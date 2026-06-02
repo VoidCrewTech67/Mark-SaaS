@@ -1,0 +1,85 @@
+# render.yaml – Render Blueprint for the MarkItDown FastAPI backend.
+#
+# IMPORTANT: This file MUST be at the repository root for Render to auto-detect it.
+# The backend Python service lives in the ./backend/ subdirectory (rootDir).
+#
+# Docs: https://render.com/docs/yaml-spec
+#
+# ── Quick Deploy Steps ─────────────────────────────────────────────────────────
+#  1. Push this repo to GitHub / GitLab.
+#  2. Open render.com → New → Blueprint → connect the repo.
+#  3. Render reads this file and creates the service automatically.
+#  4. Once deployed, copy the public URL (e.g. https://markitdown-api.onrender.com)
+#     and set it as NEXT_PUBLIC_API_URL in your Vercel frontend deployment.
+#  5. Come back to Render and update ALLOWED_ORIGINS with the Vercel URL.
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: markitdown-api
+    runtime: python
+    region: oregon           # closest to most users; also: frankfurt, singapore
+    plan: starter            # 512 MB RAM — use 'standard' (2 GB) for heavy OCR workloads
+    branch: main
+    rootDir: backend         # all paths below are relative to this directory
+
+    # ── Build ─────────────────────────────────────────────────────────────────
+    # Installs system dependencies (poppler for pdf2image, libgl for OpenCV),
+    # then the Python packages.  All run inside the rootDir (backend/).
+    buildCommand: |
+      apt-get update -qq && apt-get install -y --no-install-recommends \
+        poppler-utils \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+      && pip install --upgrade pip \
+      && pip install -r requirements.txt
+
+    # ── Start ─────────────────────────────────────────────────────────────────
+    # --workers 1  is intentional: EasyOCR's singleton reader is NOT safe to
+    # share across OS processes.  Scale horizontally with multiple Render
+    # instances instead.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --loop uvloop
+
+    # ── Health check ──────────────────────────────────────────────────────────
+    healthCheckPath: /api/health
+
+    # ── Optional persistent disk ──────────────────────────────────────────────
+    # Uncomment if you want uploaded files to survive server restarts.
+    # Without this, in-memory registries are cleared on redeploy (acceptable for
+    # stateless API with TTL-based cleanup).
+    #
+    # disk:
+    #   name: markitdown-tmp
+    #   mountPath: /opt/render/project/src/backend
+    #   sizeGB: 1
+
+    # ── Environment variables ──────────────────────────────────────────────────
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+
+      # !! REQUIRED: Update with your actual Vercel frontend URL after deploy !!
+      - key: ALLOWED_ORIGINS
+        value: "http://localhost:3000,https://your-app.vercel.app"
+
+      - key: UPLOAD_DIR
+        value: "uploads"
+      - key: CONVERTED_DIR
+        value: "converted"
+      - key: MAX_UPLOAD_SIZE_MB
+        value: "150"
+
+      # Cleanup — files expire after 2 hours, cleanup runs every 30 min
+      - key: CLEANUP_INTERVAL_SECONDS
+        value: "1800"
+      - key: FILE_TTL_SECONDS
+        value: "7200"
+
+      # OCR warm-up on startup (loads EasyOCR model weights into memory)
+      - key: OCR_WARM_UP_ON_STARTUP
+        value: "true"
+
+      - key: DEBUG
+        value: "false"

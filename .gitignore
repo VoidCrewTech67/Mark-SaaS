@@ -1,0 +1,70 @@
+# ── Python / Backend ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Pydantic / MyPy
+.mypy_cache/
+.dmypy.json
+
+# Environment files (NEVER commit real secrets)
+backend/.env
+.env
+
+# Uploaded & converted temp files (runtime artefacts — never commit)
+backend/uploads/*
+backend/converted/*
+# Keep the .gitkeep placeholders so the empty dirs are tracked
+!backend/uploads/.gitkeep
+!backend/converted/.gitkeep
+
+# EasyOCR model cache (large binary files)
+~/.EasyOCR/
+.EasyOCR/
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+
+# Vercel local
+.vercel/
+frontend/.vercel/
+
+# Frontend env files
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# ── General ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log
