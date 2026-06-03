@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import {
   uploadFile,
+  uploadZip,
   convertFile,
   chunkDocument,
   downloadMarkdown,
@@ -51,7 +52,42 @@ export function useConversion() {
 
       // Process each file sequentially (OCR is a singleton on the server)
       for (const [clientId, entry] of Object.entries(newEntries)) {
-        // ── Upload ──────────────────────────────────────────────────────
+        const isZip = entry.file.name?.toLowerCase().endsWith(".zip");
+
+        if (isZip) {
+          // ── ZIP: upload + convert + merge in one call ────────────────
+          updateEntry(clientId, { status: "uploading" });
+          try {
+            updateEntry(clientId, { status: "converting" });
+            const zipResult = await uploadZip(entry.file);
+            updateEntry(clientId, {
+              status: "done",
+              fileId: zipResult.file_id,
+              originalName: entry.file.name,
+              sizeBytes: entry.file.size,
+              supported: true,
+              result: {
+                file_id: zipResult.file_id,
+                source_name: entry.file.name,
+                success: zipResult.succeeded > 0,
+                markdown: `Merged ${zipResult.succeeded}/${zipResult.total_files} files (${zipResult.skipped} skipped)`,
+                token_estimate: zipResult.merged_token_estimate,
+                char_count: zipResult.merged_char_count,
+                word_count: 0,
+                duration_s: 0,
+                optimization_stats: null,
+              },
+            });
+          } catch (err) {
+            updateEntry(clientId, {
+              status: "error",
+              error: `ZIP processing failed: ${err.message}`,
+            });
+          }
+          continue;
+        }
+
+        // ── Regular file: upload then convert ──────────────────────────
         updateEntry(clientId, { status: "uploading" });
         let uploadData;
         try {

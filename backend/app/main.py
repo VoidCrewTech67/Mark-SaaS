@@ -42,7 +42,7 @@ from app.services.zip_service import ZipService
 from app.utils.converter import FileConverter
 
 # ── Routers ──────────────────────────────────────────────────────────────────
-from app.api.routes import health, upload, convert, chunk, download, stats
+from app.api.routes import health, upload, convert, chunk, download, stats, zip_upload
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,7 @@ def create_app() -> FastAPI:
     app.include_router(chunk.router,    prefix=prefix, tags=["Chunk"])
     app.include_router(download.router, prefix=prefix, tags=["Download"])
     app.include_router(stats.router,    prefix=prefix, tags=["Stats"])
+    app.include_router(zip_upload.router, prefix=prefix, tags=["ZIP Upload"])
 
     return app
 

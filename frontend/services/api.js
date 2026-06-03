@@ -44,6 +44,18 @@ export async function uploadFile(file) {
   return json("/api/upload", { method: "POST", body: form });
 }
 
+/**
+ * Upload a ZIP file containing multiple documents.
+ * Extracts, converts each, and merges into a single Markdown.
+ * @param {File} zipFile
+ * @returns {Promise<{file_id, total_files, succeeded, failed, skipped, files, merged_token_estimate}>}
+ */
+export async function uploadZip(zipFile) {
+  const form = new FormData();
+  form.append("file", zipFile);
+  return json("/api/upload-zip", { method: "POST", body: form });
+}
+
 // ── Convert ───────────────────────────────────────────────────────────────
 
 /**
