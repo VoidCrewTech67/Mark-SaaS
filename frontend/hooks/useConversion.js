@@ -15,9 +15,12 @@ import { stemName } from "@/lib/utils";
 /**
  * Status lifecycle for a single file:
  *   idle → uploading → uploaded → converting → done | error
+ *
+ * ZIP uploads expand into N individual entries — one per file inside the ZIP.
+ * Each entry is identical to a regular single-file entry.
  */
 export function useConversion() {
-  // Map: clientId (Date.now() + index) → ConversionEntry
+  // Map: clientId → ConversionEntry
   const [entries, setEntries] = useState({});
   // Global settings
   const [ocrMode, setOcrMode] = useState("Smart (Recommended)");
@@ -32,108 +35,168 @@ export function useConversion() {
     }));
   }, []);
 
-  // ── Upload + Convert all at once ─────────────────────────────────────────
+  const addEntry = useCallback((clientId, data) => {
+    setEntries((prev) => ({
+      ...prev,
+      [clientId]: { clientId, ...data },
+    }));
+  }, []);
+
+  // ── processFiles ──────────────────────────────────────────────────────────
   const processFiles = useCallback(
     async (files) => {
-      const newEntries = {};
-      files.forEach((file, i) => {
-        const id = `${Date.now()}_${i}`;
-        newEntries[id] = {
-          clientId: id,
-          file,
-          status: "idle",
-          fileId: null,
-          result: null,
-          chunks: null,
-          error: null,
-        };
-      });
-      setEntries((prev) => ({ ...prev, ...newEntries }));
-
-      // Process each file sequentially (OCR is a singleton on the server)
-      for (const [clientId, entry] of Object.entries(newEntries)) {
-        const isZip = entry.file.name?.toLowerCase().endsWith(".zip");
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const isZip = file.name?.toLowerCase().endsWith(".zip");
 
         if (isZip) {
-          // ── ZIP: upload + convert + merge in one call ────────────────
-          updateEntry(clientId, { status: "uploading" });
-          try {
-            updateEntry(clientId, { status: "converting" });
-            const zipResult = await uploadZip(entry.file);
-            updateEntry(clientId, {
-              status: "done",
-              fileId: zipResult.file_id,
-              originalName: entry.file.name,
-              sizeBytes: entry.file.size,
-              supported: true,
-              result: {
-                file_id: zipResult.file_id,
-                source_name: entry.file.name,
-                success: zipResult.succeeded > 0,
-                markdown: `Merged ${zipResult.succeeded}/${zipResult.total_files} files (${zipResult.skipped} skipped)`,
-                token_estimate: zipResult.merged_token_estimate,
-                char_count: zipResult.merged_char_count,
-                word_count: 0,
-                duration_s: 0,
-                optimization_stats: null,
-              },
-            });
-          } catch (err) {
-            updateEntry(clientId, {
-              status: "error",
-              error: `ZIP processing failed: ${err.message}`,
-            });
-          }
-          continue;
-        }
-
-        // ── Regular file: upload then convert ──────────────────────────
-        updateEntry(clientId, { status: "uploading" });
-        let uploadData;
-        try {
-          uploadData = await uploadFile(entry.file);
-          updateEntry(clientId, {
-            status: "uploaded",
-            fileId: uploadData.file_id,
-            originalName: uploadData.original_name,
-            sizeBytes: uploadData.size_bytes,
-            supported: uploadData.supported,
-          });
-        } catch (err) {
-          updateEntry(clientId, {
-            status: "error",
-            error: `Upload failed: ${err.message}`,
-          });
-          continue;
-        }
-
-        if (!uploadData.supported) {
-          updateEntry(clientId, {
-            status: "error",
-            error: `File type not supported by the conversion engine.`,
-          });
-          continue;
-        }
-
-        // ── Convert ─────────────────────────────────────────────────────
-        updateEntry(clientId, { status: "converting" });
-        try {
-          const result = await convertFile(uploadData.file_id, {
-            embedded_ocr_mode: ocrMode,
-          });
-          updateEntry(clientId, { status: "done", result });
-        } catch (err) {
-          updateEntry(clientId, {
-            status: "error",
-            error: `Conversion failed: ${err.message}`,
-          });
+          await processZip(file, i);
+        } else {
+          await processSingleFile(file, i);
         }
       }
     },
-    [ocrMode, updateEntry]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ocrMode, updateEntry, addEntry]
   );
 
-  // ── Chunk ────────────────────────────────────────────────────────────────
+  // ── Single file ───────────────────────────────────────────────────────────
+  async function processSingleFile(file, i) {
+    const clientId = `${Date.now()}_${i}`;
+
+    addEntry(clientId, {
+      file,
+      status: "uploading",
+      fileId: null,
+      result: null,
+      chunks: null,
+      error: null,
+      isZipChild: false,
+    });
+
+    // Upload
+    let uploadData;
+    try {
+      uploadData = await uploadFile(file);
+      updateEntry(clientId, {
+        status: "uploaded",
+        fileId: uploadData.file_id,
+        originalName: uploadData.original_name,
+        sizeBytes: uploadData.size_bytes,
+        supported: uploadData.supported,
+      });
+    } catch (err) {
+      updateEntry(clientId, { status: "error", error: `Upload failed: ${err.message}` });
+      return;
+    }
+
+    if (!uploadData.supported) {
+      updateEntry(clientId, { status: "error", error: "File type not supported." });
+      return;
+    }
+
+    // Convert
+    updateEntry(clientId, { status: "converting" });
+    try {
+      const result = await convertFile(uploadData.file_id, { embedded_ocr_mode: ocrMode });
+      updateEntry(clientId, { status: "done", result });
+    } catch (err) {
+      updateEntry(clientId, { status: "error", error: `Conversion failed: ${err.message}` });
+    }
+  }
+
+  // ── ZIP file — expands into N individual entries ───────────────────────────
+  async function processZip(file, i) {
+    // Show the ZIP itself as a placeholder while we process
+    const zipClientId = `${Date.now()}_zip_${i}`;
+    addEntry(zipClientId, {
+      file,
+      status: "uploading",
+      fileId: null,
+      result: null,
+      chunks: null,
+      error: null,
+      isZipPlaceholder: true,
+      originalName: file.name,
+    });
+
+    let zipResponse;
+    try {
+      updateEntry(zipClientId, { status: "converting" });
+      zipResponse = await uploadZip(file);
+    } catch (err) {
+      updateEntry(zipClientId, {
+        status: "error",
+        error: `ZIP processing failed: ${err.message}`,
+      });
+      return;
+    }
+
+    // Remove the placeholder now that we have real entries
+    setEntries((prev) => {
+      const next = { ...prev };
+      delete next[zipClientId];
+      return next;
+    });
+
+    // Create one entry per file result from the ZIP
+    const timestamp = Date.now();
+    const newEntries = {};
+
+    for (let j = 0; j < zipResponse.files.length; j++) {
+      const f = zipResponse.files[j];
+      const childId = `${timestamp}_zip${i}_${j}`;
+
+      if (f.success) {
+        newEntries[childId] = {
+          clientId: childId,
+          file: null,
+          status: "done",
+          fileId: f.file_id,
+          originalName: f.filename,
+          sizeBytes: null,
+          supported: true,
+          isZipChild: true,
+          zipSource: file.name,
+          result: {
+            file_id: f.file_id,
+            source_name: f.filename,
+            success: true,
+            markdown: f.markdown || "",
+            optimized_markdown: f.optimized_markdown || f.markdown || "",
+            token_estimate: f.token_estimate,
+            char_count: f.char_count,
+            word_count: f.word_count,
+            duration_s: f.duration_s,
+            ocr_used: f.ocr_used,
+            embedded_images_ocr_count: f.embedded_images_ocr_count,
+            optimization_stats: f.optimization_stats,
+          },
+          chunks: null,
+          error: null,
+        };
+      } else {
+        newEntries[childId] = {
+          clientId: childId,
+          file: null,
+          status: "error",
+          fileId: f.file_id,
+          originalName: f.filename,
+          sizeBytes: null,
+          supported: true,
+          isZipChild: true,
+          zipSource: file.name,
+          result: null,
+          chunks: null,
+          error: f.error || "Conversion failed",
+        };
+      }
+    }
+
+    setEntries((prev) => ({ ...prev, ...newEntries }));
+  }
+
+  // ── Chunk ─────────────────────────────────────────────────────────────────
   const generateChunks = useCallback(
     async (clientId) => {
       const entry = entries[clientId];
@@ -142,7 +205,7 @@ export function useConversion() {
       const maxTokens = resolveChunkSize(chunkPreset, customChunkSize);
       if (!maxTokens) return;
 
-      const overlapTokens = Math.round(maxTokens * overlapPct / 100);
+      const overlapTokens = Math.round((maxTokens * overlapPct) / 100);
 
       updateEntry(clientId, { chunkStatus: "loading" });
       try {
@@ -153,31 +216,34 @@ export function useConversion() {
         });
         updateEntry(clientId, { chunks: data, chunkStatus: "done" });
       } catch (err) {
-        updateEntry(clientId, {
-          chunkStatus: "error",
-          chunkError: err.message,
-        });
+        updateEntry(clientId, { chunkStatus: "error", chunkError: err.message });
       }
     },
     [entries, chunkPreset, customChunkSize, overlapPct, updateEntry]
   );
 
-  // ── Downloads ────────────────────────────────────────────────────────────
-  const downloadMd = useCallback(async (clientId) => {
-    const entry = entries[clientId];
-    if (!entry?.fileId) return;
-    const blob = await downloadMarkdown(entry.fileId);
-    triggerDownload(blob, stemName(entry.originalName || entry.fileId) + ".md");
-  }, [entries]);
+  // ── Downloads ─────────────────────────────────────────────────────────────
+  const downloadMd = useCallback(
+    async (clientId) => {
+      const entry = entries[clientId];
+      if (!entry?.fileId) return;
+      const blob = await downloadMarkdown(entry.fileId);
+      triggerDownload(blob, stemName(entry.originalName || entry.fileId) + ".md");
+    },
+    [entries]
+  );
 
-  const downloadChunksZip = useCallback(async (clientId) => {
-    const entry = entries[clientId];
-    if (!entry?.fileId) return;
-    const blob = await downloadZip(entry.fileId);
-    triggerDownload(blob, stemName(entry.originalName || entry.fileId) + "_chunks.zip");
-  }, [entries]);
+  const downloadChunksZip = useCallback(
+    async (clientId) => {
+      const entry = entries[clientId];
+      if (!entry?.fileId) return;
+      const blob = await downloadZip(entry.fileId);
+      triggerDownload(blob, stemName(entry.originalName || entry.fileId) + "_chunks.zip");
+    },
+    [entries]
+  );
 
-  // ── Clear ────────────────────────────────────────────────────────────────
+  // ── Clear ─────────────────────────────────────────────────────────────────
   const clearAll = useCallback(() => setEntries({}), []);
 
   const clearEntry = useCallback(

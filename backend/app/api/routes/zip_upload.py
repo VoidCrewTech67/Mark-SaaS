@@ -1,8 +1,11 @@
 """
 api/routes/zip_upload.py
 
-POST /api/upload-zip — accept a ZIP file, extract supported documents,
-convert each to Markdown, and merge into a single combined output.
+POST /api/upload-zip — extract a ZIP, convert each supported file
+independently, and return a list of individual results.
+
+Each file gets its own file_id so it can be downloaded, chunked,
+and displayed exactly like a regular single-file upload.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from pydantic import BaseModel, Field
 
 from app.api.dependencies.services import (
     get_conversion_service,
@@ -25,39 +29,42 @@ from app.api.dependencies.services import (
 )
 from app.core.config import settings
 from app.services.conversion_service import ConversionService
+from app.utils.converter import ConversionResult
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_MAX_BYTES = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+_MAX_BYTES = 500 * 1024 * 1024  # 500 MB for ZIP uploads (overrides global single-file limit)
 _MAX_FILES_IN_ZIP = 1000  # safety cap
 
 
-# ── Response model ────────────────────────────────────────────────────────────
+# ── Response models ───────────────────────────────────────────────────────────
 
-from pydantic import BaseModel, Field
-
-
-class ZipFileEntry(BaseModel):
-    """Per-file result within the ZIP."""
-    filename: str
+class ZipFileResult(BaseModel):
+    """Per-file result — mirrors a normal /api/convert response."""
+    file_id: str
+    filename: str               # original filename inside the ZIP
     success: bool
     error: Optional[str] = None
+    markdown: Optional[str] = None
+    optimized_markdown: Optional[str] = None
+    token_estimate: int = 0
     char_count: int = 0
     word_count: int = 0
-    token_estimate: int = 0
+    duration_s: float = 0.0
+    ocr_used: bool = False
+    embedded_images_ocr_count: int = 0
+    optimization_stats: Optional[dict] = None
 
 
 class ZipUploadResponse(BaseModel):
     """Response for POST /api/upload-zip."""
-    file_id: str = Field(description="ID for the merged result.")
+    zip_filename: str
     total_files: int
     succeeded: int
     failed: int
     skipped: int
-    files: List[ZipFileEntry]
-    merged_token_estimate: int = 0
-    merged_char_count: int = 0
+    files: List[ZipFileResult]
 
 
 # ── Route ─────────────────────────────────────────────────────────────────────
@@ -66,13 +73,12 @@ class ZipUploadResponse(BaseModel):
     "/upload-zip",
     response_model=ZipUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload a ZIP and merge all documents into a single Markdown",
+    summary="Upload a ZIP — convert each file independently",
     description=(
-        "Accepts a ZIP file containing multiple documents (PDF, DOCX, TXT, etc.). "
-        "Extracts each supported file, converts it to Markdown, and merges all "
-        "results into a single combined Markdown output. "
-        f"Maximum ZIP size: {settings.MAX_UPLOAD_SIZE_MB} MB. "
-        f"Maximum files inside ZIP: {_MAX_FILES_IN_ZIP}."
+        "Accepts a ZIP file. Extracts each supported document, converts it "
+        "to Markdown independently, registers each result individually, and "
+        "returns a list of per-file results. Behaves identically to uploading "
+        "multiple files manually."
     ),
 )
 async def upload_zip(
@@ -81,186 +87,174 @@ async def upload_zip(
     upload_registry: dict = Depends(get_upload_registry),
     result_registry: dict = Depends(get_result_registry),
 ) -> ZipUploadResponse:
-    # ── Validate ──────────────────────────────────────────────────────────
+
+    # ── Read + validate ───────────────────────────────────────────────────
     content = await file.read()
+    zip_filename = file.filename or "archive.zip"
+
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     if len(content) > _MAX_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=413,
             detail=(
-                f"ZIP file is too large ({len(content) / 1024 / 1024:.1f} MB). "
-                f"Maximum allowed: {settings.MAX_UPLOAD_SIZE_MB} MB."
+                f"ZIP is too large ({len(content)/1024/1024:.1f} MB). "
+                f"Maximum ZIP size: 500 MB."
             ),
         )
 
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty.",
-        )
-
-    # Verify it's a valid ZIP
     try:
         zf = zipfile.ZipFile(io.BytesIO(content))
     except zipfile.BadZipFile:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is not a valid ZIP archive.",
-        )
+        raise HTTPException(status_code=400, detail="Not a valid ZIP archive.")
 
-    # ── Extract and filter ────────────────────────────────────────────────
-    supported_exts = svc._converter.SUPPORTED_EXTENSIONS - {".zip"}  # no nested zips
-    entries = [
+    # ── Filter to supported files ─────────────────────────────────────────
+    supported_exts = svc._converter.SUPPORTED_EXTENSIONS - {".zip"}
+
+    all_members = [
         info for info in zf.infolist()
         if not info.is_dir()
         and not info.filename.startswith("__MACOSX")
         and not Path(info.filename).name.startswith(".")
-        and Path(info.filename).suffix.lower() in supported_exts
     ]
 
-    if not entries:
+    to_convert = [
+        info for info in all_members
+        if Path(info.filename).suffix.lower() in supported_exts
+    ]
+    skipped_count = len(all_members) - len(to_convert)
+
+    if not to_convert:
+        raise HTTPException(status_code=400, detail="ZIP contains no supported files.")
+
+    if len(to_convert) > _MAX_FILES_IN_ZIP:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ZIP contains no supported files.",
+            status_code=400,
+            detail=f"ZIP contains {len(to_convert)} files; max is {_MAX_FILES_IN_ZIP}.",
         )
 
-    if len(entries) > _MAX_FILES_IN_ZIP:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"ZIP contains {len(entries)} files. "
-                f"Maximum allowed: {_MAX_FILES_IN_ZIP}."
-            ),
-        )
-
-    skipped_count = sum(
-        1 for info in zf.infolist()
-        if not info.is_dir()
-        and not info.filename.startswith("__MACOSX")
-        and not Path(info.filename).name.startswith(".")
-        and Path(info.filename).suffix.lower() not in supported_exts
-    )
+    to_convert.sort(key=lambda e: e.filename)  # stable ordering
 
     logger.info(
-        "[zip-upload] ZIP '%s' contains %d supported files, %d skipped",
-        file.filename, len(entries), skipped_count,
+        "[zip-upload] '%s' — %d to convert, %d skipped",
+        zip_filename, len(to_convert), skipped_count,
     )
 
-    # ── Convert each file ─────────────────────────────────────────────────
-    merged_parts: List[str] = []
-    file_results: List[ZipFileEntry] = []
+    # ── Convert each file independently ──────────────────────────────────
+    file_results: List[ZipFileResult] = []
     succeeded = 0
+    loop = asyncio.get_event_loop()
 
-    # Sort by path for consistent ordering
-    entries.sort(key=lambda e: e.filename)
-
-    for info in entries:
+    for info in to_convert:
         original_name = Path(info.filename).name
         file_data = zf.read(info.filename)
+        file_id = uuid.uuid4().hex
 
-        # Save to uploads/ with UUID
-        loop = asyncio.get_event_loop()
-        uuid_path, _ = await loop.run_in_executor(
-            None, lambda fn=original_name, fd=file_data: svc._converter.save_upload(fn, fd)
-        )
+        # Save to uploads/ with its own UUID
+        try:
+            uuid_path, _ = await loop.run_in_executor(
+                None,
+                lambda fn=original_name, fd=file_data: svc._converter.save_upload(fn, fd),
+            )
+        except Exception as exc:
+            logger.warning("[zip-upload] Could not save '%s': %s", original_name, exc)
+            file_results.append(ZipFileResult(
+                file_id=file_id, filename=info.filename,
+                success=False, error=f"Save failed: {exc}",
+            ))
+            continue
 
+        # Register in upload_registry so cleanup knows about it
+        upload_registry[file_id] = {
+            "path": uuid_path,
+            "original_name": original_name,
+            "uploaded_at": time.time(),
+        }
+
+        # Convert
         try:
             result, opt_md, opt_stats = await svc.convert(
                 source_path=uuid_path,
                 original_name=original_name,
                 embedded_ocr_mode="Smart (Recommended)",
             )
-
-            if result.success:
-                # Use optimized markdown if available, otherwise raw
-                md_content = opt_md or result.markdown
-
-                # Add file header + content
-                merged_parts.append(
-                    f"---\n\n"
-                    f"# 📄 {original_name}\n\n"
-                    f"{md_content.strip()}\n"
-                )
-
-                file_results.append(ZipFileEntry(
-                    filename=info.filename,
-                    success=True,
-                    char_count=result.char_count,
-                    word_count=result.word_count,
-                    token_estimate=result.token_estimate,
-                ))
-                succeeded += 1
-            else:
-                file_results.append(ZipFileEntry(
-                    filename=info.filename,
-                    success=False,
-                    error=result.error,
-                ))
         except Exception as exc:
-            logger.exception("[zip-upload] Failed to convert '%s'", original_name)
-            file_results.append(ZipFileEntry(
-                filename=info.filename,
-                success=False,
-                error=str(exc),
+            logger.exception("[zip-upload] Conversion failed for '%s'", original_name)
+            file_results.append(ZipFileResult(
+                file_id=file_id, filename=info.filename,
+                success=False, error=str(exc),
             ))
+            continue
+
+        if not result.success:
+            file_results.append(ZipFileResult(
+                file_id=file_id, filename=info.filename,
+                success=False, error=result.error or "Conversion failed",
+            ))
+            continue
+
+        # Persist individual .md file
+        md_content = opt_md or result.markdown or ""
+        md_path = svc._converter.converted_dir / f"{file_id}.md"
+        try:
+            md_path.write_text(md_content, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("[zip-upload] Could not write md for '%s': %s", original_name, exc)
+
+        # Register in result_registry (same structure as /api/convert)
+        result_registry[file_id] = {
+            "result": result,
+            "optimized_markdown": opt_md,
+            "opt_stats": opt_stats,
+            "original_name": original_name,
+        }
+
+        # Also update the upload_registry path with the saved uuid_path
+        upload_registry[file_id]["path"] = uuid_path
+
+        opt_stats_dict = None
+        if opt_stats:
+            try:
+                opt_stats_dict = opt_stats if isinstance(opt_stats, dict) else opt_stats.dict()
+            except Exception:
+                opt_stats_dict = None
+
+        file_results.append(ZipFileResult(
+            file_id=file_id,
+            filename=info.filename,
+            success=True,
+            markdown=result.markdown,
+            optimized_markdown=opt_md,
+            token_estimate=result.token_estimate,
+            char_count=result.char_count,
+            word_count=result.word_count,
+            duration_s=getattr(result, "duration_s", 0.0),
+            ocr_used=getattr(result, "ocr_used", False),
+            embedded_images_ocr_count=getattr(result, "embedded_images_ocr_count", 0),
+            optimization_stats=opt_stats_dict,
+        ))
+        succeeded += 1
+        logger.info("[zip-upload] ✓ '%s' → %d tokens", original_name, result.token_estimate)
 
     zf.close()
 
-    # ── Merge into single markdown ────────────────────────────────────────
-    merged_markdown = "\n\n".join(merged_parts).strip()
-
-    if not merged_markdown:
+    if succeeded == 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="All files in the ZIP failed to convert.",
         )
 
-    # Compute merged stats
-    from app.utils.token_counter import estimate_tokens, count_chars
-    merged_tokens = estimate_tokens(merged_markdown)
-    merged_chars = count_chars(merged_markdown)
-
-    # ── Persist merged result ─────────────────────────────────────────────
-    merged_id = uuid.uuid4().hex
-    merged_path = svc._converter.converted_dir / f"{merged_id}.md"
-    merged_path.write_text(merged_markdown, encoding="utf-8")
-
-    # Register so /api/download and /api/stats can find it
-    from app.utils.converter import ConversionResult
-    merged_result = ConversionResult(
-        source_path=merged_path,
-        source_name=file.filename or "merged.zip",
-        output_path=merged_path,
-        markdown=merged_markdown,
-        success=True,
-        file_size_bytes=len(content),
-    )
-
-    result_registry[merged_id] = {
-        "result": merged_result,
-        "optimized_markdown": merged_markdown,
-        "opt_stats": None,
-        "original_name": file.filename or "merged.zip",
-    }
-
-    upload_registry[merged_id] = {
-        "path": merged_path,
-        "original_name": file.filename or "merged.zip",
-        "uploaded_at": time.time(),
-    }
-
     logger.info(
-        "[zip-upload] Done: %d/%d succeeded, merged=%d tokens, id=%s",
-        succeeded, len(entries), merged_tokens, merged_id,
+        "[zip-upload] Done: %d/%d succeeded, %d failed",
+        succeeded, len(to_convert), len(to_convert) - succeeded,
     )
 
     return ZipUploadResponse(
-        file_id=merged_id,
-        total_files=len(entries),
+        zip_filename=zip_filename,
+        total_files=len(to_convert),
         succeeded=succeeded,
-        failed=len(entries) - succeeded,
+        failed=len(to_convert) - succeeded,
         skipped=skipped_count,
         files=file_results,
-        merged_token_estimate=merged_tokens,
-        merged_char_count=merged_chars,
     )

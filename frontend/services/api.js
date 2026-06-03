@@ -46,9 +46,22 @@ export async function uploadFile(file) {
 
 /**
  * Upload a ZIP file containing multiple documents.
- * Extracts, converts each, and merges into a single Markdown.
+ * Each supported file is converted independently.
  * @param {File} zipFile
- * @returns {Promise<{file_id, total_files, succeeded, failed, skipped, files, merged_token_estimate}>}
+ * @returns {Promise<{
+ *   zip_filename: string,
+ *   total_files: number,
+ *   succeeded: number,
+ *   failed: number,
+ *   skipped: number,
+ *   files: Array<{
+ *     file_id: string, filename: string, success: boolean,
+ *     markdown: string, optimized_markdown: string,
+ *     token_estimate: number, char_count: number, word_count: number,
+ *     duration_s: number, ocr_used: boolean,
+ *     embedded_images_ocr_count: number, optimization_stats: object|null
+ *   }>
+ * }>}
  */
 export async function uploadZip(zipFile) {
   const form = new FormData();
