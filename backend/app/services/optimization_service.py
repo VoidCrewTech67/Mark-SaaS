@@ -26,14 +26,20 @@ logger = logging.getLogger(__name__)
 # ── Default pass ordering ─────────────────────────────────────────────────────
 
 _DEFAULT_PASS_ORDER = [
+    "equation_extraction",       # FIRST — protect equations
+    "ocr_cleanup",
     "header_footer_detection",
+    "content_boilerplate",
     "reference_section_removal",
     "boilerplate_section_removal",
     "citation_removal",
     "table_compression",
+    "semantic_table_transform",
     "global_paragraph_deduplication",
     "abbreviation_mining",
-    # "semantic_deduplication",  # disabled by default (heavy; needs model)
+    "semantic_deduplication",
+    "importance_aware",
+    "equation_restoration",      # LAST — restore equations
 ]
 
 
