@@ -85,14 +85,10 @@ class ConversionService:
             if ocr_warning:
                 result.ocr_warning = ocr_warning
 
-        # ── Step 3: Markdown optimization ───────────────────────────────
-        opt_md: str = await loop.run_in_executor(
-            None, lambda: optimize_markdown(result.markdown)
-        )
-        opt_stats = OptimizationStats(
-            original_text=result.markdown,
-            optimized_text=opt_md,
-        )
+        # ── Step 3: Markdown optimization (legacy + modular pipeline) ────
+        from app.services.optimization_service import OptimizationService
+        opt_svc = OptimizationService()
+        opt_md, opt_stats = await opt_svc.optimize(result.markdown)
         logger.info(
             "[conversion_service] Optimization saved %d tokens (%.1f%%) for '%s'",
             opt_stats.tokens_saved, opt_stats.percent_saved, original_name,
