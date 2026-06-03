@@ -83,10 +83,17 @@ async def _run_single_conversion(
     opt_stats_response: OptimizationStatsResponse | None = None
     if opt_stats is not None:
         opt_stats_response = OptimizationStatsResponse(
-            original_tokens=opt_stats.original_tokens,
-            optimized_tokens=opt_stats.optimized_tokens,
-            tokens_saved=opt_stats.tokens_saved,
-            percent_saved=opt_stats.percent_saved,
+            original_tokens       = opt_stats.original_tokens,
+            optimized_tokens      = opt_stats.optimized_tokens,
+            tokens_saved          = opt_stats.tokens_saved,
+            percent_saved         = opt_stats.percent_saved,
+            semantic_preservation = opt_stats.semantic_preservation,
+            semantic_loss         = opt_stats.semantic_loss,
+            context_preservation  = opt_stats.context_preservation,
+            overall_preservation  = opt_stats.overall_preservation,
+            scoring_method        = opt_stats.scoring_method,
+            context_breakdown     = opt_stats.context_breakdown,
+            issues                = opt_stats.issues,
         )
 
     # ── Persist in result registry for /stats and /download ─────────────────

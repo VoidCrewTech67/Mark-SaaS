@@ -65,18 +65,24 @@ export default function UploadZone({ onConvert, disabled }) {
         </div>
       )}
 
-      {/* Toolbar: Upload left, Convert right */}
+      {/* Toolbar */}
       <div className="upload-toolbar">
-        <button className="btn btn-ghost" onClick={() => inputRef.current?.click()} disabled={disabled}>
+        {/* Upload button — primary purple */}
+        <button className="btn btn-upload" onClick={() => inputRef.current?.click()} disabled={disabled}>
           📁 Upload Files
         </button>
+
         {staged.length > 0 && (
           <button className="btn btn-ghost btn-sm" onClick={() => setStaged([])}>✕ Clear</button>
         )}
+
         <div className="toolbar-right">
-          <span className="toolbar-info">200 MB per file</span>
+          <span className="toolbar-info">500 MB per ZIP · 150 MB per file</span>
           <button className="btn btn-convert" onClick={handleConvert} disabled={!staged.length || disabled}>
-            {disabled ? <><span className="spinner spinner-sm"/>Converting…</> : <>▶ Convert {staged.length > 0 ? `(${staged.length}) ` : ""}All</>}
+            {disabled
+              ? <><span className="spinner spinner-sm"/>Converting…</>
+              : <>▶ Convert{staged.length > 0 ? ` (${staged.length})` : ""} All</>
+            }
           </button>
         </div>
       </div>

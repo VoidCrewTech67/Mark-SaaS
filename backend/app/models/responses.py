@@ -34,10 +34,18 @@ class UploadResponse(BaseModel):
 # ── Optimization ─────────────────────────────────────────────────────────────
 
 class OptimizationStatsResponse(BaseModel):
-    original_tokens: int
+    original_tokens:  int
     optimized_tokens: int
-    tokens_saved: int
-    percent_saved: float
+    tokens_saved:     int
+    percent_saved:    float
+    # Semantic scores (None when scoring was skipped)
+    semantic_preservation: Optional[float] = None
+    semantic_loss:         Optional[float] = None
+    context_preservation:  Optional[float] = None
+    overall_preservation:  Optional[float] = None
+    scoring_method:        Optional[str]   = None
+    context_breakdown:     Optional[dict]  = None
+    issues:                Optional[list]  = None
 
 
 # ── Conversion ───────────────────────────────────────────────────────────────

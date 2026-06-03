@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 import UploadZone from "@/components/UploadZone";
@@ -9,17 +9,32 @@ import { buildZipFromStrings } from "@/lib/clientZip";
 import { triggerDownload } from "@/services/api";
 import { stemName } from "@/lib/utils";
 
+// ── OCR options ───────────────────────────────────────────────────────────────
 const OCR_OPTS = [
-  { value: "Disabled", label: "Disabled" },
-  { value: "Smart (Recommended)", label: "Smart (Recommended)" },
-  { value: "Aggressive", label: "Aggressive" },
+  {
+    value: "Disabled",
+    label: "Disabled",
+    desc: "Do not run OCR on embedded images. Fastest processing. Use when documents contain no meaningful images.",
+  },
+  {
+    value: "Smart (Recommended)",
+    label: "Smart",
+    desc: <>Selective image scanning. Uses heuristics to skip logos, icons, and decorative graphics. <strong>Best balance of speed and accuracy.</strong></>,
+  },
+  {
+    value: "Aggressive",
+    label: "Aggressive",
+    desc: "Scan every extracted image. Maximum OCR coverage. Slower processing with higher CPU usage.",
+  },
 ];
+
+// ── Chunk options ──────────────────────────────────────────────────────────────
 const CHUNK_OPTS = [
-  { value: "None", label: "None" },
-  { value: "4K tokens", label: "4K tokens" },
-  { value: "8K tokens", label: "8K tokens" },
-  { value: "16K tokens", label: "16K tokens" },
-  { value: "Custom", label: "Custom" },
+  { value: "None",      label: "None",    desc: "Single markdown output. No chunking applied." },
+  { value: "4K tokens", label: "4K",      desc: "Optimized for GPT-3.5, GPT-4o Mini, and Gemini Flash." },
+  { value: "8K tokens", label: "8K",      desc: "Optimized for GPT-4o, Claude Sonnet, and Gemini Pro." },
+  { value: "16K tokens",label: "16K",     desc: "Optimized for Claude Opus, GPT-4o, and long-context workflows." },
+  { value: "Custom",    label: "Custom",  desc: "Define your own chunk size in tokens." },
 ];
 
 export default function HomePage() {
@@ -31,6 +46,10 @@ export default function HomePage() {
   } = conv;
 
   const [health, setHealth] = useState(null);
+  // Track which card to auto-expand (the latest completed one)
+  const [expandedId, setExpandedId] = useState(null);
+  const prevDoneRef = useRef(new Set());
+
   const isProcessing = entryList.some(e => ["uploading","uploaded","converting"].includes(e.status));
   const successful = entryList.filter(e => e.status === "done" && e.result);
 
@@ -39,21 +58,28 @@ export default function HomePage() {
       .then(r => r.json()).then(setHealth).catch(() => {});
   }, []);
 
-  // Auto-expand logic: expand all if <=3, else expand first only
-  const shouldAutoExpand = (index) => {
-    const doneCount = entryList.filter(e => e.status === "done").length;
-    if (doneCount <= 3) return true;
-    // Find first done entry
-    const firstDoneIdx = entryList.findIndex(e => e.status === "done");
-    return index === firstDoneIdx;
-  };
+  // Auto-expand: detect newly completed entries, expand the latest one
+  useEffect(() => {
+    const currentDoneIds = new Set(
+      entryList.filter(e => e.status === "done").map(e => e.clientId)
+    );
+    const newlyDone = [...currentDoneIds].filter(id => !prevDoneRef.current.has(id));
+    if (newlyDone.length > 0) {
+      // Expand the last one (most recent in process order)
+      setExpandedId(newlyDone[newlyDone.length - 1]);
+    }
+    prevDoneRef.current = currentDoneIds;
+  }, [entryList]);
 
   const handleDownloadAll = async () => {
     if (!successful.length) return;
-    const items = successful.map(e => [stemName(e.originalName||"doc")+".md", e.result?.markdown||""]);
+    const items = successful.map(e => [stemName(e.originalName || "doc") + ".md", e.result?.markdown || ""]);
     const blob = await buildZipFromStrings(items);
     triggerDownload(blob, "markitdown_all.zip");
   };
+
+  const ocrSelected = OCR_OPTS.find(o => o.value === ocrMode) || OCR_OPTS[1];
+  const chunkSelected = CHUNK_OPTS.find(o => o.value === chunkPreset) || CHUNK_OPTS[0];
 
   return (
     <div className="app-shell">
@@ -62,6 +88,7 @@ export default function HomePage() {
         <Navbar />
         <div className="main-scroll">
           <div className="page">
+
             {/* Hero */}
             <div className="hero">
               <div className="hero-badge">⚡ Powered by Microsoft MarkItDown</div>
@@ -72,47 +99,72 @@ export default function HomePage() {
             {/* Upload */}
             <UploadZone onConvert={processFiles} disabled={isProcessing} />
 
-            {/* Options row */}
-            <div className="options-row">
-              <div className="opt-group">
-                <span className="opt-label">Embedded Image OCR</span>
-                <select value={ocrMode} onChange={e => setOcrMode(e.target.value)}>
-                  {OCR_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-              <div className="opt-group">
-                <span className="opt-label">Smart Chunking</span>
-                <select value={chunkPreset} onChange={e => setChunkPreset(e.target.value)}>
-                  {CHUNK_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-              {chunkPreset === "Custom" && (
-                <div className="opt-group" style={{ minWidth: 100 }}>
-                  <span className="opt-label">Token Limit</span>
-                  <input type="number" min={500} max={128000} step={500}
-                    value={customChunkSize} onChange={e => setCustomChunkSize(Number(e.target.value))} />
+            {/* Settings grid */}
+            <div className="settings-grid">
+
+              {/* OCR card */}
+              <div className="settings-card">
+                <div className="settings-card-title">Embedded Image OCR</div>
+                <div className="ocr-options">
+                  {OCR_OPTS.map(o => (
+                    <button
+                      key={o.value}
+                      className={`ocr-option${ocrMode === o.value ? " selected" : ""}`}
+                      onClick={() => setOcrMode(o.value)}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
                 </div>
-              )}
-              {chunkPreset !== "None" && (
-                <div className="opt-group" style={{ minWidth: 130 }}>
-                  <span className="opt-label">Overlap — {overlapPct}%</span>
-                  <input type="range" min={0} max={25} step={5}
-                    value={overlapPct} onChange={e => setOverlapPct(Number(e.target.value))} />
+                <div className="option-desc">{ocrSelected.desc}</div>
+              </div>
+
+              {/* Chunking card */}
+              <div className="settings-card">
+                <div className="settings-card-title">Smart Chunking</div>
+                <div className="chunk-presets">
+                  {CHUNK_OPTS.map(o => (
+                    <button
+                      key={o.value}
+                      className={`chunk-preset-btn${chunkPreset === o.value ? " selected" : ""}`}
+                      onClick={() => setChunkPreset(o.value)}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
                 </div>
-              )}
+                <div className="option-desc">{chunkSelected.desc}</div>
+                {chunkPreset === "Custom" && (
+                  <div className="chunk-custom-row">
+                    <label>Tokens</label>
+                    <input type="number" min={500} max={128000} step={500}
+                      value={customChunkSize}
+                      onChange={e => setCustomChunkSize(Number(e.target.value))} />
+                  </div>
+                )}
+                {chunkPreset !== "None" && (
+                  <div className="chunk-custom-row">
+                    <label>Overlap — {overlapPct}%</label>
+                    <input type="range" min={0} max={25} step={5}
+                      value={overlapPct}
+                      onChange={e => setOverlapPct(Number(e.target.value))} />
+                  </div>
+                )}
+              </div>
+
             </div>
 
             {/* Results header */}
             {entryList.length > 0 && (
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:10, marginBottom:6 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
                 <span style={{ fontSize:11.5, fontWeight:600, color:"var(--text-2)" }}>
-                  Results — {entryList.length} file{entryList.length!==1?"s":""}
+                  Results — {entryList.length} file{entryList.length !== 1 ? "s" : ""}
                 </span>
                 <div style={{ display:"flex", gap:5 }}>
                   {successful.length > 1 && (
-                    <button className="btn btn-ghost btn-sm" onClick={handleDownloadAll}>⬇ All</button>
+                    <button className="btn btn-ghost btn-sm" onClick={handleDownloadAll}>⬇ Download All</button>
                   )}
-                  <button className="btn btn-ghost btn-sm" onClick={clearAll}>✕ Clear</button>
+                  <button className="btn btn-ghost btn-sm" onClick={clearAll}>✕ Clear All</button>
                 </div>
               </div>
             )}
@@ -120,11 +172,11 @@ export default function HomePage() {
             {/* Results */}
             {entryList.length > 0 ? (
               <div className="results">
-                {entryList.map((entry, idx) => (
+                {entryList.map((entry) => (
                   <ResultCard
                     key={entry.clientId}
                     entry={entry}
-                    defaultOpen={entry.status === "done" && shouldAutoExpand(idx)}
+                    isActive={entry.clientId === expandedId}
                     chunkPreset={chunkPreset}
                     chunkSize={chunkSize}
                     overlapPct={overlapPct}
@@ -142,6 +194,7 @@ export default function HomePage() {
                 <div className="empty-sub">Upload documents above to begin conversion.</div>
               </div>
             )}
+
           </div>
         </div>
       </div>

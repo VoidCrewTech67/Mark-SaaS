@@ -128,6 +128,29 @@ class OptimizationService:
             original_text=markdown,
             optimized_text=final,
         )
+
+        # ── Step 3: Semantic preservation scoring ────────────────────────
+        try:
+            from app.services.semantic_scoring import SemanticScoringService
+            sem = await loop.run_in_executor(
+                None, lambda: SemanticScoringService.score(markdown, final)
+            )
+            if sem is not None:
+                stats.semantic_preservation = sem.semantic_preservation
+                stats.semantic_loss         = sem.semantic_loss
+                stats.context_preservation  = sem.context_preservation
+                stats.overall_preservation  = sem.overall_preservation
+                stats.scoring_method        = sem.method
+                stats.context_breakdown     = sem.context_breakdown
+                stats.issues                = [i.to_dict() for i in sem.issues]
+                logger.info(
+                    "[optimization_service] sem=%.1f%% ctx=%.1f%% overall=%.1f%% (%s)",
+                    sem.semantic_preservation, sem.context_preservation,
+                    sem.overall_preservation, sem.method,
+                )
+        except Exception as exc:
+            logger.warning("[optimization_service] Semantic scoring failed: %s", exc)
+
         logger.info(
             "[optimization_service] Total saved %d tokens (%.1f%%)",
             stats.tokens_saved, stats.percent_saved,
@@ -159,6 +182,24 @@ class OptimizationService:
             original_text=markdown,
             optimized_text=final,
         )
+
+        # Semantic scoring
+        try:
+            from app.services.semantic_scoring import SemanticScoringService
+            sem = await loop.run_in_executor(
+                None, lambda: SemanticScoringService.score(markdown, final)
+            )
+            if sem is not None:
+                stats.semantic_preservation = sem.semantic_preservation
+                stats.semantic_loss         = sem.semantic_loss
+                stats.context_preservation  = sem.context_preservation
+                stats.overall_preservation  = sem.overall_preservation
+                stats.scoring_method        = sem.method
+                stats.context_breakdown     = sem.context_breakdown
+                stats.issues                = [i.to_dict() for i in sem.issues]
+        except Exception as exc:
+            logger.warning("[optimization_service] Semantic scoring failed: %s", exc)
+
         return final, stats, report_json
 
     @property

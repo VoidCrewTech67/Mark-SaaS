@@ -26,8 +26,17 @@ from app.utils.token_counter import estimate_tokens, format_stat
 class OptimizationStats:
     """Holds before/after stats for a single optimization run."""
 
-    original_text: str
+    original_text:  str
     optimized_text: str
+
+    # Semantic scores — populated by SemanticScoringService after optimization
+    semantic_preservation:  float | None = None   # 0–100  (embedding recall)
+    semantic_loss:          float | None = None   # 0–100
+    context_preservation:   float | None = None   # 0–100  (structural)
+    overall_preservation:   float | None = None   # 0–100  (harmonic mean)
+    scoring_method:         str   | None = None   # "embedding" | "bow" | ...
+    context_breakdown:      dict  | None = None   # per-metric scores
+    issues:                 list  | None = None   # PreservationIssue list
 
     @property
     def original_tokens(self) -> int:
