@@ -100,11 +100,16 @@ class SemanticScoringService:
         # ── Step 2: Semantic (embeddings) ─────────────────────────────────────
         try:
             sem, low_chunks, method = cls._semantic_score(original, optimized)
-        except ImportError:
-            logger.warning("[semantic_scoring] sentence-transformers not available; using BoW fallback")
+        except ImportError as exc:
+            logger.warning(
+                "[semantic_scoring] sentence-transformers not available; using BoW fallback. "
+                "Cause: %s", exc,
+            )
+            logger.debug("[semantic_scoring] ImportError traceback:", exc_info=True)
             sem, low_chunks, method = _bow_cosine(original, optimized), [], "bow"
         except Exception as exc:
             logger.warning("[semantic_scoring] Embedding scoring failed (%s); using BoW fallback", exc)
+            logger.debug("[semantic_scoring] Full embedding failure traceback:", exc_info=True)
             sem, low_chunks, method = _bow_cosine(original, optimized), [], "bow"
 
         # ── Step 3: Harmonic mean ─────────────────────────────────────────────
