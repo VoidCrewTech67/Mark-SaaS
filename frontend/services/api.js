@@ -75,16 +75,29 @@ export async function uploadZip(zipFile) {
  * Convert a single uploaded file.
  * @param {string} fileId
  * @param {object} opts
- * @param {string} opts.embedded_ocr_mode  "Disabled" | "Smart (Recommended)" | "Aggressive"
+ * @param {string} opts.document_type       "research_paper" | "general_document"
+ * @param {string|null} opts.optimization_mode  "safe" | "balanced" | "aggressive" | "rag"
+ * @param {string} opts.embedded_ocr_mode   "Disabled" | "Smart (Recommended)" | "Aggressive"
+ * @param {string|null} opts.extractor_override  "markitdown" | "docling" | null
  */
 export async function convertFile(fileId, opts = {}) {
+  const payload = {
+    file_id: fileId,
+    document_type: opts.document_type ?? "general_document",
+    embedded_ocr_mode: opts.embedded_ocr_mode ?? "Smart (Recommended)",
+  };
+  // Always send optimization_mode (works for both doc types now)
+  if (opts.optimization_mode) {
+    payload.optimization_mode = opts.optimization_mode;
+  }
+  // Extractor override (optional)
+  if (opts.extractor_override) {
+    payload.extractor_override = opts.extractor_override;
+  }
   return json("/api/convert", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      file_id: fileId,
-      embedded_ocr_mode: opts.embedded_ocr_mode ?? "Smart (Recommended)",
-    }),
+    body: JSON.stringify(payload),
   });
 }
 

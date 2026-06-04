@@ -48,7 +48,7 @@ export default function UploadZone({ onConvert, disabled }) {
           <span className="format-badge">+ more</span>
         </div>
         <input ref={inputRef} type="file" multiple accept={ACCEPT}
-          style={{ display: "none" }} onChange={e => addFiles(e.target.files)} disabled={disabled} />
+          style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} disabled={disabled} />
       </div>
 
       {/* Staged files */}

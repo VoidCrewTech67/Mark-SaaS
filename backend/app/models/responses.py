@@ -56,6 +56,11 @@ class ConversionResponse(BaseModel):
     success: bool
     error: Optional[str] = None
 
+    # Pipeline metadata
+    document_type: str = "general_document"
+    optimization_mode: Optional[str] = None
+    extractor: str = "markitdown"  # "markitdown" | "docling" | "docling→markitdown"
+
     # Content (only set on success)
     markdown: Optional[str] = None
     optimized_markdown: Optional[str] = None

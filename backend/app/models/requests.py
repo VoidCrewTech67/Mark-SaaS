@@ -21,12 +21,38 @@ class ConvertRequest(BaseModel):
     file_id: str = Field(
         description="The file_id returned by POST /api/upload."
     )
+    document_type: Literal["research_paper", "general_document"] = Field(
+        default="general_document",
+        description=(
+            "research_paper: use Docling for extraction + universal optimization. "
+            "general_document: use MarkItDown + universal optimization."
+        ),
+    )
+    optimization_mode: Optional[Literal["safe", "balanced", "aggressive", "rag"]] = Field(
+        default=None,
+        description=(
+            "Optimization mode (works for both document types). "
+            "safe: cleanup only (5-10%% reduction). "
+            "balanced: remove references/boilerplate + dedup (15-40%%). Default. "
+            "aggressive: maximum reduction (30-60%%). "
+            "rag: balanced + structured output for retrieval. "
+            "Defaults to 'balanced' when omitted."
+        ),
+    )
     embedded_ocr_mode: Literal["Disabled", "Smart (Recommended)", "Aggressive"] = Field(
         default="Smart (Recommended)",
         description=(
+            "Embedded image OCR mode (used by MarkItDown extractor). "
             "Disabled: skip embedded-image OCR (fastest). "
             "Smart: filter decorative images automatically. "
             "Aggressive: OCR every embedded image."
+        ),
+    )
+    extractor_override: Optional[Literal["markitdown", "docling"]] = Field(
+        default=None,
+        description=(
+            "Force a specific extractor regardless of document_type. "
+            "None: auto-select based on document_type."
         ),
     )
 
@@ -35,7 +61,10 @@ class BatchConvertItem(BaseModel):
     """A single item inside a batch convert request."""
 
     file_id: str
+    document_type: Literal["research_paper", "general_document"] = "general_document"
+    optimization_mode: Optional[Literal["safe", "balanced", "aggressive", "rag"]] = None
     embedded_ocr_mode: Literal["Disabled", "Smart (Recommended)", "Aggressive"] = "Smart (Recommended)"
+    extractor_override: Optional[Literal["markitdown", "docling"]] = None
 
 
 class BatchConvertRequest(BaseModel):

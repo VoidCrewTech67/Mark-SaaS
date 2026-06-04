@@ -9,6 +9,53 @@ import { buildZipFromStrings } from "@/lib/clientZip";
 import { triggerDownload } from "@/services/api";
 import { stemName } from "@/lib/utils";
 
+// ── Document type options ─────────────────────────────────────────────────────
+const DOC_TYPE_OPTS = [
+  {
+    value: "research_paper",
+    icon: "🔬",
+    label: "Research Paper",
+    sub: "Academic · Optimized",
+    desc: <>Optimized for <strong>academic papers</strong>. Removes references, acknowledgements, and boilerplate. Preserves title, abstract, equations, tables, and section hierarchy.</>,
+  },
+  {
+    value: "general_document",
+    icon: "📋",
+    label: "General Document",
+    sub: "MarkItDown · Universal",
+    desc: <>Uses <strong>Microsoft MarkItDown</strong> for fast, universal extraction. Works with PDF, DOCX, PPTX, XLSX, HTML, and more. Best for non-academic documents.</>,
+  },
+];
+
+// ── Optimization mode options (research paper only) ───────────────────────────
+const OPT_MODE_OPTS = [
+  {
+    value: "safe",
+    label: "Safe",
+    desc: "Cleanup only — remove page numbers, repeated headers/footers, normalize whitespace, merge broken lines. Preserves everything else.",
+    reduction: "5-10%",
+  },
+  {
+    value: "balanced",
+    label: "Balanced",
+    desc: "Safe + remove references, bibliography, acknowledgements, funding sections, and copyright notices. Recommended default.",
+    reduction: "15-40%",
+    recommended: true,
+  },
+  {
+    value: "aggressive",
+    label: "Aggressive",
+    desc: "Balanced + remove appendices, supplementary material, collapse figure descriptions, strip conference boilerplate and metadata.",
+    reduction: "30-60%",
+  },
+  {
+    value: "rag",
+    label: "RAG",
+    desc: "Balanced reductions + structured section extraction with metadata. Optimized for retrieval-augmented generation pipelines.",
+    reduction: "Structured",
+  },
+];
+
 // ── OCR options ───────────────────────────────────────────────────────────────
 const OCR_OPTS = [
   {
@@ -41,7 +88,11 @@ export default function HomePage() {
   const conv = useConversion();
   const {
     entryList, processFiles, generateChunks, downloadMd, downloadChunksZip,
-    clearAll, clearEntry, ocrMode, setOcrMode, chunkPreset, setChunkPreset,
+    clearAll, clearEntry,
+    documentType, setDocumentType,
+    optimizationMode, setOptimizationMode,
+    ocrMode, setOcrMode,
+    chunkPreset, setChunkPreset,
     customChunkSize, setCustomChunkSize, overlapPct, setOverlapPct, chunkSize,
   } = conv;
 
@@ -78,8 +129,12 @@ export default function HomePage() {
     triggerDownload(blob, "markitdown_all.zip");
   };
 
+  const docTypeSelected = DOC_TYPE_OPTS.find(o => o.value === documentType) || DOC_TYPE_OPTS[1];
+  const optModeSelected = OPT_MODE_OPTS.find(o => o.value === optimizationMode) || OPT_MODE_OPTS[1];
   const ocrSelected = OCR_OPTS.find(o => o.value === ocrMode) || OCR_OPTS[1];
   const chunkSelected = CHUNK_OPTS.find(o => o.value === chunkPreset) || CHUNK_OPTS[0];
+
+  const isResearchPaper = documentType === "research_paper";
 
   return (
     <div className="app-shell">
@@ -99,27 +154,110 @@ export default function HomePage() {
             {/* Upload */}
             <UploadZone onConvert={processFiles} disabled={isProcessing} />
 
+            {/* Document Type selector — full width above settings grid */}
+            <div style={{
+              background: "var(--bg-2)", borderRadius: 10, padding: "14px 16px",
+              marginBottom: 14, border: "1px solid var(--border)"
+            }}>
+              <div className="settings-card-title">Document Type</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {DOC_TYPE_OPTS.map(o => {
+                  const sel = documentType === o.value;
+                  return (
+                    <div
+                      key={o.value}
+                      onClick={() => setDocumentType(o.value)}
+                      style={{
+                        display: "flex", flexDirection: "column", gap: 4,
+                        padding: "14px 16px", borderRadius: 8, cursor: "pointer",
+                        border: sel ? "1.5px solid var(--purple)" : "1.5px solid var(--border)",
+                        background: sel ? "var(--purple-dim)" : "var(--bg-3)",
+                        transition: "all .2s", userSelect: "none",
+                        boxShadow: sel ? "0 0 0 1px rgba(139,92,246,.1)" : "none",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 18 }}>{o.icon}</span>
+                        <span style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: sel ? "var(--purple)" : "var(--text)"
+                        }}>{o.label}</span>
+                      </div>
+                      <span style={{
+                        fontSize: 10, fontWeight: 500,
+                        color: sel ? "var(--purple)" : "var(--text-3)",
+                        opacity: sel ? 0.75 : 1,
+                      }}>{o.sub}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{
+                fontSize: 11, color: "var(--text-3)", lineHeight: 1.55,
+                marginTop: 10, minHeight: 32
+              }}>{docTypeSelected.desc}</div>
+            </div>
+
             {/* Settings grid */}
             <div className="settings-grid">
 
-              {/* OCR card */}
-              <div className="settings-card">
-                <div className="settings-card-title">Embedded Image OCR</div>
-                <div className="ocr-options">
-                  {OCR_OPTS.map(o => (
-                    <button
-                      key={o.value}
-                      className={`ocr-option${ocrMode === o.value ? " selected" : ""}`}
-                      onClick={() => setOcrMode(o.value)}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
+              {/* OCR card — only for General Document */}
+              {!isResearchPaper && (
+                <div className="settings-card">
+                  <div className="settings-card-title">Embedded Image OCR</div>
+                  <div className="ocr-options">
+                    {OCR_OPTS.map(o => (
+                      <button
+                        key={o.value}
+                        className={`ocr-option${ocrMode === o.value ? " selected" : ""}`}
+                        onClick={() => setOcrMode(o.value)}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="option-desc">{ocrSelected.desc}</div>
                 </div>
-                <div className="option-desc">{ocrSelected.desc}</div>
-              </div>
+              )}
 
-              {/* Chunking card */}
+              {/* Optimization Mode card — works for all document types */}
+              {(
+                <div className="settings-card">
+                  <div className="settings-card-title">Optimization Mode</div>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    {OPT_MODE_OPTS.map(o => {
+                      const sel = optimizationMode === o.value;
+                      return (
+                        <button
+                          key={o.value}
+                          onClick={() => setOptimizationMode(o.value)}
+                          style={{
+                            flex: 1, padding: "7px 8px", borderRadius: 7,
+                            border: sel ? "1px solid var(--purple)" : "1px solid var(--border)",
+                            background: sel ? "var(--purple-dim)" : "var(--bg-3)",
+                            cursor: "pointer", fontSize: 11, fontWeight: 500,
+                            color: sel ? "var(--purple)" : "var(--text-2)",
+                            textAlign: "center", transition: "all .15s",
+                            userSelect: "none", fontFamily: "inherit",
+                          }}
+                        >
+                          {o.label}{o.recommended ? " ✦" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="option-desc">
+                    {optModeSelected.desc}
+                    {optModeSelected.reduction && (
+                      <span style={{ display: "block", marginTop: 4, fontSize: 10, color: "var(--purple)", fontWeight: 600 }}>
+                        Expected reduction: {optModeSelected.reduction}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Chunking card — always visible */}
               <div className="settings-card">
                 <div className="settings-card-title">Smart Chunking</div>
                 <div className="chunk-presets">
@@ -201,3 +339,4 @@ export default function HomePage() {
     </div>
   );
 }
+

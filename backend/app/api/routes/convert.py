@@ -52,10 +52,13 @@ def _lookup_upload(file_id: str, upload_registry: dict) -> dict:
 
 async def _run_single_conversion(
     file_id: str,
+    document_type: str,
+    optimization_mode: str | None,
     embedded_ocr_mode: str,
     upload_registry: dict,
     result_registry: dict,
     svc: ConversionService,
+    extractor_override: str | None = None,
 ) -> ConversionResponse:
     """Core logic shared by single and batch convert."""
     meta = _lookup_upload(file_id, upload_registry)
@@ -69,14 +72,17 @@ async def _run_single_conversion(
         )
 
     logger.info(
-        "[convert] Starting conversion — file_id=%s, name='%s', ocr_mode=%s",
-        file_id, original_name, embedded_ocr_mode,
+        "[convert] Starting conversion — file_id=%s, name='%s', doc_type=%s, mode=%s",
+        file_id, original_name, document_type, optimization_mode,
     )
 
     result, opt_md, opt_stats = await svc.convert(
         source_path=source_path,
         original_name=original_name,
+        document_type=document_type,
+        optimization_mode=optimization_mode,
         embedded_ocr_mode=embedded_ocr_mode,
+        extractor_override=extractor_override,
     )
 
     # ── Build optimization stats response ───────────────────────────────────
@@ -109,11 +115,22 @@ async def _run_single_conversion(
         file_id, result.success, result.duration_s,
     )
 
+    # ── Determine which extractor was used ───────────────────────────────────
+    # The extractor info is stored in result metadata if available
+    extractor_name = "markitdown"  # default
+    if document_type == "research_paper":
+        extractor_name = extractor_override or "docling"
+    if extractor_override:
+        extractor_name = extractor_override
+
     return ConversionResponse(
         file_id=file_id,
         source_name=result.source_name,
         success=result.success,
         error=result.error if not result.success else None,
+        document_type=document_type,
+        optimization_mode=optimization_mode or "balanced",
+        extractor=extractor_name,
         markdown=result.markdown if result.success else None,
         optimized_markdown=opt_md if result.success and opt_md else None,
         duration_s=result.duration_s,
@@ -150,10 +167,13 @@ async def convert_single(
 ) -> ConversionResponse:
     return await _run_single_conversion(
         file_id=body.file_id,
+        document_type=body.document_type,
+        optimization_mode=body.optimization_mode,
         embedded_ocr_mode=body.embedded_ocr_mode,
         upload_registry=upload_registry,
         result_registry=result_registry,
         svc=svc,
+        extractor_override=body.extractor_override,
     )
 
 
@@ -178,10 +198,13 @@ async def convert_batch(
         try:
             response = await _run_single_conversion(
                 file_id=item.file_id,
+                document_type=item.document_type,
+                optimization_mode=item.optimization_mode,
                 embedded_ocr_mode=item.embedded_ocr_mode,
                 upload_registry=upload_registry,
                 result_registry=result_registry,
                 svc=svc,
+                extractor_override=item.extractor_override,
             )
         except HTTPException as exc:
             # Surface per-file errors without aborting the whole batch

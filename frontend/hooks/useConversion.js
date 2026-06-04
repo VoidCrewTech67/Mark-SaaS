@@ -23,6 +23,8 @@ export function useConversion() {
   // Map: clientId → ConversionEntry
   const [entries, setEntries] = useState({});
   // Global settings
+  const [documentType, setDocumentType] = useState("general_document");
+  const [optimizationMode, setOptimizationMode] = useState("balanced");
   const [ocrMode, setOcrMode] = useState("Smart (Recommended)");
   const [chunkPreset, setChunkPreset] = useState("None");
   const [customChunkSize, setCustomChunkSize] = useState(4000);
@@ -57,7 +59,7 @@ export function useConversion() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ocrMode, updateEntry, addEntry]
+    [ocrMode, documentType, optimizationMode, updateEntry, addEntry]
   );
 
   // ── Single file ───────────────────────────────────────────────────────────
@@ -98,7 +100,11 @@ export function useConversion() {
     // Convert
     updateEntry(clientId, { status: "converting" });
     try {
-      const result = await convertFile(uploadData.file_id, { embedded_ocr_mode: ocrMode });
+      const result = await convertFile(uploadData.file_id, {
+        document_type: documentType,
+        optimization_mode: optimizationMode,
+        embedded_ocr_mode: documentType === "general_document" ? ocrMode : "Disabled",
+      });
       updateEntry(clientId, { status: "done", result });
     } catch (err) {
       updateEntry(clientId, { status: "error", error: `Conversion failed: ${err.message}` });
@@ -268,6 +274,8 @@ export function useConversion() {
     clearAll,
     clearEntry,
     // Settings
+    documentType, setDocumentType,
+    optimizationMode, setOptimizationMode,
     ocrMode, setOcrMode,
     chunkPreset, setChunkPreset,
     customChunkSize, setCustomChunkSize,
