@@ -170,13 +170,7 @@ We believe in being transparent about what the system cannot do:
 
 ---
 
-## Screenshots
 
-| Dashboard View | Upload & Configuration | Analytics & Results |
-|:---:|:---:|:---:|
-| <img src="https://placehold.co/600x400?text=Dashboard+Overview" width="300"/> | <img src="https://placehold.co/600x400?text=Upload+Zone" width="300"/> | <img src="https://placehold.co/600x400?text=Optimization+Metrics" width="300"/> |
-
----
 
 ## Contributing
 
