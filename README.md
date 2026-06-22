@@ -34,7 +34,7 @@ The optimizer supports four modes, selected via the `optimization_mode` field.
 | `safe` | Equation protection, OCR artifact cleanup, header/footer detection |
 | `balanced` | Safe passes + reference section removal, boilerplate removal, citation removal, paragraph deduplication |
 | `aggressive` | Balanced passes + table compression, semantic table transform, abbreviation mining, semantic deduplication, importance-aware filtering |
-| `rag` | Same passes as `balanced` |
+| `rag` | Retrieval pipeline — `balanced` passes + structured chunking (chunk_id, section, token/word/char counts). Returns JSON, not markdown. Frontend renders a dedicated dashboard + chunk cards (no Preview/Optimized/Raw tabs). Primary export is `<name>.rag.json`, directly consumable by ChromaDB, Pinecone, Qdrant, Weaviate, LangChain, LlamaIndex. |
 
 Default mode is `balanced`.
 

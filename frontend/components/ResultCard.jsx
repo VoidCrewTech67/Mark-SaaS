@@ -97,6 +97,157 @@ function Tabs({ tabs }) {
   );
 }
 
+// ── RAG helpers ───────────────────────────────────────────────────────────────
+// Output shape is intentionally universal so the same JSON loads cleanly into
+// Pinecone (id + metadata + text), ChromaDB (ids/documents/metadatas),
+// Qdrant (id + payload), Weaviate (id + properties), LangChain
+// (page_content + metadata) and LlamaIndex (text + metadata).
+function buildRagExport(result, displayName) {
+  const rawChunks = Array.isArray(result?.chunks) ? result.chunks : [];
+  const docType =
+    result?.detected_document_type || result?.document_type || "generic";
+  const sourceFile = displayName || "";
+  const documentTitle = stemName(displayName);
+
+  const chunks = rawChunks.map((ch, i) => {
+    const isObj = ch && typeof ch === "object";
+    const content = isObj ? (ch.content || "") : String(ch);
+    const idx = isObj && ch.index != null ? ch.index : i + 1;
+    const id =
+      isObj && ch.chunk_id ? ch.chunk_id : `chunk_${String(idx).padStart(3, "0")}`;
+    const tokenCount = isObj && ch.token_count != null ? ch.token_count : 0;
+    const wordCount =
+      isObj && ch.word_count != null
+        ? ch.word_count
+        : content.split(/\s+/).filter(Boolean).length;
+    const charCount = isObj && ch.char_count != null ? ch.char_count : content.length;
+
+    const metadata = {
+      source_file: sourceFile,
+      document_title: documentTitle,
+      document_type: docType,
+      section: isObj ? (ch.section ?? null) : null,
+      page_number: isObj && ch.page_number != null ? ch.page_number : null,
+      chunk_index: idx,
+      token_count: tokenCount,
+      word_count: wordCount,
+      char_count: charCount,
+      overlap_prev_tokens:
+        isObj && ch.overlap_prev_tokens != null ? ch.overlap_prev_tokens : 0,
+      has_table: !!(isObj && ch.has_table),
+      table_summary: isObj && ch.table_summary != null ? ch.table_summary : null,
+    };
+
+    return {
+      // Vector-DB canonical
+      id,
+      text: content,
+      metadata,
+      // Backward-compat aliases (do not remove — old loaders consume these)
+      chunk_id: id,
+      index: idx,
+      content,
+      section: metadata.section,
+      token_count: tokenCount,
+      word_count: wordCount,
+      char_count: charCount,
+    };
+  });
+
+  return {
+    mode: "rag",
+    document_id: documentTitle,
+    document_title: documentTitle,
+    source_file: sourceFile,
+    document_type: docType,
+    chunk_count: result?.chunk_count ?? chunks.length,
+    chunks,
+  };
+}
+
+function RagView({ result, displayName }) {
+  const [openChunk, setOpenChunk] = useState(null);
+  const [rawOpen, setRawOpen] = useState(false);
+  const exportObj = buildRagExport(result, displayName);
+  const jsonStr = JSON.stringify(exportObj, null, 2);
+  const chunks = exportObj.chunks;
+  const totalTokens = chunks.reduce((s, c) => s + (c.token_count || 0), 0);
+  const avgChunkSize = chunks.length ? Math.round(totalTokens / chunks.length) : 0;
+
+  const downloadJson = () => {
+    const b = new Blob([jsonStr], { type: "application/json" });
+    const u = URL.createObjectURL(b);
+    const a = document.createElement("a");
+    a.href = u;
+    a.download = stemName(displayName) + ".rag.json";
+    a.click();
+    URL.revokeObjectURL(u);
+  };
+
+  return (
+    <div>
+      {/* Dashboard */}
+      <div className="stats-row" style={{ marginBottom: 10 }}>
+        <div className="stat-pill">
+          <div className="stat-value" style={{ color: "#8B5CF6", fontSize: 13 }}>{exportObj.document_type}</div>
+          <div className="stat-label">Document Type</div>
+        </div>
+        <div className="stat-pill">
+          <div className="stat-value" style={{ color: "#6366F1" }}>{formatNumber(exportObj.chunk_count)}</div>
+          <div className="stat-label">Chunk Count</div>
+        </div>
+        <div className="stat-pill">
+          <div className="stat-value" style={{ color: "#A855F7" }}>{formatNumber(totalTokens)}</div>
+          <div className="stat-label">Total Tokens</div>
+        </div>
+        <div className="stat-pill">
+          <div className="stat-value" style={{ color: "#10B981" }}>{formatNumber(avgChunkSize)}</div>
+          <div className="stat-label">Avg Chunk Size</div>
+        </div>
+      </div>
+
+      {/* Export actions */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+        <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>
+          Retrieval-ready JSON · ChromaDB · Pinecone · Qdrant · Weaviate · LangChain · LlamaIndex
+        </span>
+        <div style={{ display: "flex", gap: 5 }}>
+          <CopyBtn text={jsonStr} />
+          <button className="btn btn-primary btn-sm" onClick={downloadJson}>⬇ Download JSON</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setRawOpen(p => !p)}>
+            {rawOpen ? "Hide" : "View"} Raw JSON
+          </button>
+        </div>
+      </div>
+
+      {rawOpen && (
+        <pre className="md-pre" style={{ maxHeight: 280, overflow: "auto", marginBottom: 10 }}>
+          {jsonStr.length > 12000 ? jsonStr.slice(0, 12000) + "\n…(truncated, use Download JSON for full)" : jsonStr}
+        </pre>
+      )}
+
+      {/* Chunk cards */}
+      <div className="chunk-list">
+        {chunks.map((ch, i) => (
+          <div key={ch.chunk_id} className="chunk-item">
+            <div className="chunk-header" onClick={() => setOpenChunk(openChunk === i ? null : i)}>
+              <span className="chunk-idx">{ch.chunk_id}</span>
+              {ch.section && <span className="chunk-meta" style={{ fontWeight: 600 }}>{ch.section}</span>}
+              <span className="chunk-meta">{ch.token_count} tok · {ch.word_count} words</span>
+              <span style={{ color: "var(--text-3)", fontSize: 9 }}>{openChunk === i ? "▲" : "▼"}</span>
+            </div>
+            {openChunk === i && (
+              <pre className="chunk-pre">
+                {ch.content.slice(0, 1500)}{ch.content.length > 1500 ? "\n…" : ""}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── ResultCard ────────────────────────────────────────────────────────────────
 export default function ResultCard({
   entry, isActive, chunkPreset, chunkSize, overlapPct,
@@ -128,6 +279,8 @@ export default function ResultCard({
       return () => clearTimeout(t);
     }
   }, [isActive, isDone]);
+
+  const isRag = result?.mode === "rag";
 
   const tabs = isDone ? [
     { key:"preview", label:"Preview", content: (
@@ -211,37 +364,54 @@ export default function ResultCard({
     })()},
     { key:"chunks", label:"Chunks", content: (
       <div>
-        {chunkPreset==="None" ? (
-          <p style={{ fontSize:11.5, color:"var(--text-3)" }}>Enable Smart Chunking in the settings above to split this document.</p>
-        ) : !chunks && chunkStatus!=="loading" ? (
-          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-            <p style={{ fontSize:11.5, color:"var(--text-2)" }}>Split into ≤{formatNumber(chunkSize)} token chunks with {overlapPct}% overlap.</p>
-            <button className="btn btn-primary btn-sm" onClick={() => onGenerateChunks(clientId)} style={{ width:"fit-content" }}>🔀 Generate Chunks</button>
+        {chunks?.chunks?.length ? (
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <span style={{ fontSize:11.5, color:"var(--text-2)" }}>
+                <b style={{color:"var(--text)"}}>{chunks.chunk_count}</b> chunks
+                {result?.mode==="rag" && (
+                  <span style={{ marginLeft:6, padding:"1px 6px", borderRadius:4, background:"var(--accent-soft, #2a2a3a)", fontSize:10 }}>
+                    RAG · {chunks.document_type || result.detected_document_type || "generic"}
+                  </span>
+                )}
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={() => onDownloadZip(clientId)}>⬇ ZIP</button>
+            </div>
+            <div className="chunk-list">
+              {chunks.chunks.map((ch,i) => {
+                // Structured chunk (object) or legacy string — handle both.
+                const isObj = ch && typeof ch === "object";
+                const content = isObj ? (ch.content || "") : String(ch);
+                const words = isObj ? (ch.word_count ?? content.split(/\s+/).length) : content.split(/\s+/).length;
+                const label = isObj ? (ch.chunk_id || `#${String(i+1).padStart(3,"0")}`) : `#${String(i+1).padStart(3,"0")}`;
+                return (
+                  <div key={i} className="chunk-item">
+                    <div className="chunk-header" onClick={() => setOpenChunk(openChunk===i?null:i)}>
+                      <span className="chunk-idx">{label}</span>
+                      {isObj && ch.section && <span className="chunk-meta" style={{ fontWeight:600 }}>{ch.section}</span>}
+                      <span className="chunk-meta">
+                        {isObj && ch.token_count != null ? `${ch.token_count} tok · ` : ""}~{words} words
+                      </span>
+                      <span style={{color:"var(--text-3)",fontSize:9}}>{openChunk===i?"▲":"▼"}</span>
+                    </div>
+                    {openChunk===i && <pre className="chunk-pre">{content.slice(0,1200)}{content.length>1200?"\n…":""}</pre>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : chunkStatus==="loading" ? (
           <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11.5, color:"var(--text-2)" }}><span className="spinner"/>Chunking…</div>
         ) : chunkStatus==="error" ? (
           <div className="error-box">{chunkError}</div>
-        ) : chunks?.chunks?.length ? (
-          <div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <span style={{ fontSize:11.5, color:"var(--text-2)" }}><b style={{color:"var(--text)"}}>{chunks.chunk_count}</b> chunks</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => onDownloadZip(clientId)}>⬇ ZIP</button>
-            </div>
-            <div className="chunk-list">
-              {chunks.chunks.map((ch,i) => (
-                <div key={i} className="chunk-item">
-                  <div className="chunk-header" onClick={() => setOpenChunk(openChunk===i?null:i)}>
-                    <span className="chunk-idx">#{String(i+1).padStart(3,"0")}</span>
-                    <span className="chunk-meta">~{ch.split(/\s+/).length} words</span>
-                    <span style={{color:"var(--text-3)",fontSize:9}}>{openChunk===i?"▲":"▼"}</span>
-                  </div>
-                  {openChunk===i && <pre className="chunk-pre">{ch.slice(0,1200)}{ch.length>1200?"\n…":""}</pre>}
-                </div>
-              ))}
-            </div>
+        ) : chunkPreset==="None" ? (
+          <p style={{ fontSize:11.5, color:"var(--text-3)" }}>Enable Smart Chunking in the settings above, or select <b>RAG</b> mode for automatic retrieval-ready chunks.</p>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            <p style={{ fontSize:11.5, color:"var(--text-2)" }}>Split into ≤{formatNumber(chunkSize)} token chunks with {overlapPct}% overlap.</p>
+            <button className="btn btn-primary btn-sm" onClick={() => onGenerateChunks(clientId)} style={{ width:"fit-content" }}>🔀 Generate Chunks</button>
           </div>
-        ) : null}
+        )}
       </div>
     )},
     { key:"raw", label:"Raw", content: (
@@ -289,7 +459,13 @@ export default function ResultCard({
       </div>
 
       {isError && <div className="error-box">{error}</div>}
-      {open && isDone && <div className="result-body"><Tabs tabs={tabs}/></div>}
+      {open && isDone && (
+        <div className="result-body">
+          {isRag
+            ? <RagView result={result} displayName={displayName} />
+            : <Tabs tabs={tabs} />}
+        </div>
+      )}
     </div>
   );
 }

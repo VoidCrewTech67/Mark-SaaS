@@ -7,6 +7,11 @@ aiofiles>=23.2.1
 
 # ── Existing conversion engine (unchanged) ────────────────────────────────
 markitdown[all]>=0.1.0
+
+# ── Docling extractor (research_paper mode) ───────────────────────────────
+# Without this, DoclingExtractor hits ImportError and silently falls back
+# to MarkItDown. Loads layout/tableformer/OCR ML models — needs ~2GB RAM.
+docling>=2.104.0
 easyocr>=1.7.1
 Pillow>=10.0.0
 pdf2image>=1.16.3

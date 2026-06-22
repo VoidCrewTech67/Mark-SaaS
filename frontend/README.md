@@ -44,6 +44,72 @@ App opens at: http://localhost:3000
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | FastAPI backend URL |
 
+## File Structure
+
+```
+frontend/
+├── app/                          # Next.js App Router
+│   ├── layout.js                 # Root layout + global styles
+│   ├── page.js                   # Home page
+│   ├── globals.css               # Global Tailwind styles
+│   ├── favicon.ico
+│   └── docs/
+│       └── page.js               # Documentation page
+├── components/                   # React components
+│   ├── Header.jsx
+│   ├── Navbar.jsx
+│   ├── Sidebar.jsx
+│   ├── UploadZone.jsx
+│   ├── ChunkViewer.jsx
+│   ├── MarkdownPreview.jsx
+│   ├── ResultCard.jsx
+│   ├── StatsDisplay.jsx
+│   ├── SettingsPanel.jsx
+│   ├── ConversionProgress.jsx
+│   ├── SessionHistory.jsx
+│   ├── converter/                # Converter subcomponents
+│   │   ├── DropZone.jsx
+│   │   ├── PremiumResultCard.jsx
+│   │   ├── ProductMockup.jsx
+│   │   └── SettingsAccordion.jsx
+│   ├── layout/                   # Layout subcomponents
+│   │   ├── GradientBackground.jsx
+│   │   └── SiteHeader.jsx
+│   ├── sections/                 # Page sections
+│   │   ├── HeroSection.jsx
+│   │   ├── ConverterSection.jsx
+│   │   ├── FeaturesSection.jsx
+│   │   ├── ResultsSection.jsx
+│   │   └── FooterSection.jsx
+│   └── ui/                       # Reusable UI primitives
+│       ├── Badge.jsx
+│       ├── Button.jsx
+│       ├── Card.jsx
+│       ├── Select.jsx
+│       └── Tabs.jsx
+├── hooks/                        # Custom React hooks
+│   ├── useConversion.js
+│   └── useHistory.js
+├── lib/                          # Utilities
+│   ├── clientZip.js              # Client-side ZIP generation
+│   └── utils.js
+├── public/                       # Static assets
+│   ├── file.svg
+│   ├── globe.svg
+│   ├── next.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── .gitignore
+├── jsconfig.json
+├── next.config.js
+├── postcss.config.mjs
+├── package.json
+├── package-lock.json
+├── AGENTS.md
+├── CLAUDE.md
+└── README.md
+```
+
 ## Deployment on Vercel
 
 1. Connect the repo on [Vercel](https://vercel.com).

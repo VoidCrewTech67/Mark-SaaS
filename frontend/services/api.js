@@ -79,6 +79,8 @@ export async function uploadZip(zipFile) {
  * @param {string|null} opts.optimization_mode  "safe" | "balanced" | "aggressive" | "rag"
  * @param {string} opts.embedded_ocr_mode   "Disabled" | "Smart (Recommended)" | "Aggressive"
  * @param {string|null} opts.extractor_override  "markitdown" | "docling" | null
+ * @param {number|null} opts.chunk_max_tokens     RAG mode: chunk size (null → backend 800)
+ * @param {number|null} opts.chunk_overlap_tokens RAG mode: overlap   (null → backend 100)
  */
 export async function convertFile(fileId, opts = {}) {
   const payload = {
@@ -93,6 +95,13 @@ export async function convertFile(fileId, opts = {}) {
   // Extractor override (optional)
   if (opts.extractor_override) {
     payload.extractor_override = opts.extractor_override;
+  }
+  // RAG mode: forward chunk sizing (omit when null → backend defaults 800/100)
+  if (opts.chunk_max_tokens != null) {
+    payload.chunk_max_tokens = opts.chunk_max_tokens;
+  }
+  if (opts.chunk_overlap_tokens != null) {
+    payload.chunk_overlap_tokens = opts.chunk_overlap_tokens;
   }
   return json("/api/convert", {
     method: "POST",

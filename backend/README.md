@@ -2,30 +2,100 @@
 
 Production-ready FastAPI backend for the MarkItDown document-to-Markdown conversion pipeline.
 
-## Architecture
+## File Structure
 
 ```
 backend/
 ├── app/
-│   ├── api/
-│   │   ├── dependencies/services.py   # FastAPI DI providers
-│   │   └── routes/
-│   │       ├── health.py              # GET  /api/health
-│   │       ├── upload.py              # POST /api/upload
-│   │       ├── convert.py             # POST /api/convert, /api/convert/batch
-│   │       ├── chunk.py               # POST /api/chunk
-│   │       ├── download.py            # GET  /api/download/{id}, /api/download-zip/{id}
-│   │       └── stats.py               # GET  /api/stats/{id}
-│   ├── services/                      # Async wrappers over utils
-│   ├── models/                        # Pydantic request/response schemas
-│   ├── core/                          # Config + logging
-│   ├── utils/                         # Conversion engine (copied from Streamlit app)
-│   └── main.py                        # App factory + lifespan
-├── uploads/                           # Temp uploaded files (UUID-named)
-├── converted/                         # Temp converted .md files
+│   ├── api/                          # API layer
+│   │   ├── dependencies/
+│   │   │   ├── __init__.py
+│   │   │   └── services.py           # FastAPI DI providers
+│   │   ├── routes/                   # Route handlers
+│   │   │   ├── __init__.py
+│   │   │   ├── health.py             # GET  /api/health
+│   │   │   ├── upload.py             # POST /api/upload
+│   │   │   ├── convert.py            # POST /api/convert, /api/convert/batch
+│   │   │   ├── chunk.py              # POST /api/chunk
+│   │   │   ├── download.py           # GET  /api/download/{id}, /api/download-zip/{id}
+│   │   │   ├── stats.py              # GET  /api/stats/{id}
+│   │   │   └── zip_upload.py
+│   │   └── __init__.py
+│   ├── services/                     # Async service layer
+│   │   ├── __init__.py
+│   │   ├── chunking_service.py
+│   │   ├── cleanup_service.py
+│   │   ├── conversion_service.py
+│   │   ├── docling_service.py
+│   │   ├── extractors.py
+│   │   ├── ocr_service.py
+│   │   ├── optimization_service.py
+│   │   ├── research_paper_optimizer.py
+│   │   ├── semantic_scoring.py
+│   │   └── zip_service.py
+│   ├── models/                       # Pydantic schemas
+│   │   ├── __init__.py
+│   │   ├── requests.py
+│   │   └── responses.py
+│   ├── optimizer/                    # Markdown optimization engine
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── config.py
+│   │   ├── exceptions.py
+│   │   ├── models.py
+│   │   ├── pipeline.py
+│   │   ├── pipeline_v2.py
+│   │   ├── registry.py
+│   │   ├── report.py
+│   │   ├── validator.py
+│   │   ├── passes/                   # Optimization passes
+│   │   │   ├── __init__.py
+│   │   │   ├── _example.py
+│   │   │   ├── abbreviation_mining.py
+│   │   │   ├── boilerplate_section.py
+│   │   │   ├── citation.py
+│   │   │   ├── content_boilerplate.py
+│   │   │   ├── equation_preservation.py
+│   │   │   ├── header_footer.py
+│   │   │   ├── importance_aware.py
+│   │   │   ├── ocr_cleanup.py
+│   │   │   ├── paragraph_dedup.py
+│   │   │   ├── reference_section.py
+│   │   │   ├── semantic_dedup.py
+│   │   │   ├── semantic_table_transform.py
+│   │   │   └── table_compression.py
+│   │   └── tests/                    # Optimizer tests
+│   │       ├── __init__.py
+│   │       ├── conftest.py
+│   │       ├── test_*.py (comprehensive test suite)
+│   │       └── ...
+│   ├── utils/                        # Utility functions
+│   │   ├── __init__.py
+│   │   ├── converter.py
+│   │   ├── doctype.py
+│   │   ├── image_extractor.py
+│   │   ├── ocr_handler.py
+│   │   ├── optimizer.py
+│   │   ├── token_counter.py
+│   │   └── zip_handler.py
+│   ├── core/                         # Core config
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   └── log_config.py
+│   ├── __init__.py
+│   └── main.py                       # FastAPI app factory
+├── scripts/                          # Utility scripts
+│   └── run_rag_test.py
+├── tests/                            # Integration tests
+│   └── test_semantic_scoring.py
+├── uploads/                          # Temp uploaded files (UUID-named)
+├── converted/                        # Temp converted .md files
+├── .env
+├── .env.example
 ├── requirements.txt
+├── requirements-dev.txt
 ├── render.yaml
-└── .env.example
+└── README.md
 ```
 
 ## Quick Start (Local)

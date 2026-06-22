@@ -59,7 +59,7 @@ export function useConversion() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ocrMode, documentType, optimizationMode, updateEntry, addEntry]
+    [ocrMode, documentType, optimizationMode, chunkPreset, customChunkSize, overlapPct, updateEntry, addEntry]
   );
 
   // ── Single file ───────────────────────────────────────────────────────────
@@ -100,12 +100,30 @@ export function useConversion() {
     // Convert
     updateEntry(clientId, { status: "converting" });
     try {
+      const isRag = optimizationMode === "rag";
+      // RAG: respect UI chunk preset; "None" → null → backend default (800/100)
+      const ragMaxTokens = isRag ? resolveChunkSize(chunkPreset, customChunkSize) || null : null;
+      const ragOverlap =
+        isRag && ragMaxTokens ? Math.round((ragMaxTokens * overlapPct) / 100) : null;
+
       const result = await convertFile(uploadData.file_id, {
         document_type: documentType,
         optimization_mode: optimizationMode,
         embedded_ocr_mode: documentType === "general_document" ? ocrMode : "Disabled",
+        chunk_max_tokens: ragMaxTokens,
+        chunk_overlap_tokens: ragOverlap,
       });
-      updateEntry(clientId, { status: "done", result });
+      // RAG returns structured chunks inline — surface them in the Chunks tab.
+      const patch = { status: "done", result };
+      if (result?.mode === "rag" && Array.isArray(result.chunks)) {
+        patch.chunks = {
+          chunks: result.chunks,
+          chunk_count: result.chunk_count ?? result.chunks.length,
+          document_type: result.detected_document_type,
+        };
+        patch.chunkStatus = "done";
+      }
+      updateEntry(clientId, patch);
     } catch (err) {
       updateEntry(clientId, { status: "error", error: `Conversion failed: ${err.message}` });
     }
