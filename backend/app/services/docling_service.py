@@ -61,7 +61,15 @@ class DoclingService:
         def _do_convert() -> str:
             logger.info("[docling_service] Converting '%s'…", source_path.name)
             result = converter.convert(str(source_path))
-            md = result.document.export_to_markdown()
+            # Try to embed page-break markers so the RAG chunker can attach
+            # page_number metadata. Newer Docling supports page_break_placeholder;
+            # older versions fall back to plain export_to_markdown().
+            try:
+                md = result.document.export_to_markdown(
+                    page_break_placeholder="<!-- page-break -->",
+                )
+            except TypeError:
+                md = result.document.export_to_markdown()
             logger.info(
                 "[docling_service] Done: %d chars extracted from '%s'",
                 len(md), source_path.name,

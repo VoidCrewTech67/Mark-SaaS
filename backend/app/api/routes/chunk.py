@@ -75,17 +75,27 @@ async def chunk_document(
         body.file_id, source_label, body.max_tokens, body.overlap_tokens,
     )
 
-    # ── Run chunking ─────────────────────────────────────────────────────────
-    chunks = await svc.chunk(source_text, body.max_tokens, body.overlap_tokens)
-
-    # Resolve actual overlap used (mirrors chunk_markdown default logic)
+    # Resolve actual overlap used (mirrors chunk_markdown_structured default)
+    from app.utils.optimizer import DEFAULT_RAG_OVERLAP_TOKENS
     actual_overlap = (
         body.overlap_tokens
         if body.overlap_tokens is not None
-        else max(0, int(body.max_tokens * 0.10))
+        else DEFAULT_RAG_OVERLAP_TOKENS
     )
 
-    # ── Persist chunks for download endpoint ─────────────────────────────────
+    # ── Detect document type (heuristic) ─────────────────────────────────────
+    from app.utils.doctype import detect_document_type
+    original_name = entry.get("original_name", body.file_id)
+    doc_type = detect_document_type(source_text, original_name)
+
+    # ── Run structured chunking (same impl as RAG convert) ───────────────────
+    chunks = await svc.chunk_structured(
+        source_text, body.max_tokens, body.overlap_tokens,
+        source_file=original_name,
+        document_type=doc_type,
+    )
+
+    # ── Persist chunks (dicts) for download endpoint ─────────────────────────
     entry["chunks"] = chunks
     entry["chunk_source_name"] = entry.get("original_name", body.file_id)
 
@@ -99,5 +109,6 @@ async def chunk_document(
         chunk_count=len(chunks),
         max_tokens=body.max_tokens,
         overlap_tokens=actual_overlap,
+        document_type=doc_type,
         source=source_label,
     )

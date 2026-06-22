@@ -55,6 +55,17 @@ class ConvertRequest(BaseModel):
             "None: auto-select based on document_type."
         ),
     )
+    chunk_max_tokens: Optional[int] = Field(
+        default=None, gt=0, le=128000,
+        description=(
+            "RAG mode only: max tokens per chunk. None → 800 default. "
+            "Set from the UI chunk preset when the user picks one."
+        ),
+    )
+    chunk_overlap_tokens: Optional[int] = Field(
+        default=None, ge=0,
+        description="RAG mode only: token overlap between chunks. None → 100 default.",
+    )
 
 
 class BatchConvertItem(BaseModel):
@@ -65,6 +76,8 @@ class BatchConvertItem(BaseModel):
     optimization_mode: Optional[Literal["safe", "balanced", "aggressive", "rag"]] = None
     embedded_ocr_mode: Literal["Disabled", "Smart (Recommended)", "Aggressive"] = "Smart (Recommended)"
     extractor_override: Optional[Literal["markitdown", "docling"]] = None
+    chunk_max_tokens: Optional[int] = None
+    chunk_overlap_tokens: Optional[int] = None
 
 
 class BatchConvertRequest(BaseModel):

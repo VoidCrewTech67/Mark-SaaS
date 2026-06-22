@@ -28,6 +28,7 @@ from app.models.responses import (
     ConversionResponse,
     BatchConversionResponse,
     OptimizationStatsResponse,
+    ChunkMeta,
 )
 from app.services.conversion_service import ConversionService
 
@@ -59,6 +60,8 @@ async def _run_single_conversion(
     result_registry: dict,
     svc: ConversionService,
     extractor_override: str | None = None,
+    chunk_max_tokens: int | None = None,
+    chunk_overlap_tokens: int | None = None,
 ) -> ConversionResponse:
     """Core logic shared by single and batch convert."""
     meta = _lookup_upload(file_id, upload_registry)
@@ -83,6 +86,8 @@ async def _run_single_conversion(
         optimization_mode=optimization_mode,
         embedded_ocr_mode=embedded_ocr_mode,
         extractor_override=extractor_override,
+        chunk_max_tokens=chunk_max_tokens,
+        chunk_overlap_tokens=chunk_overlap_tokens,
     )
 
     # ── Build optimization stats response ───────────────────────────────────
@@ -102,12 +107,19 @@ async def _run_single_conversion(
             issues                = opt_stats.issues,
         )
 
+    # ── Build RAG structured-chunk response (additive — markdown preserved) ──
+    rag_chunks: list[ChunkMeta] | None = None
+    if result.success and result.chunks:
+        rag_chunks = [ChunkMeta(**c) for c in result.chunks]
+
     # ── Persist in result registry for /stats and /download ─────────────────
+    # RAG chunks (dicts) stored so /api/download-zip can build the archive.
     result_registry[file_id] = {
         "result": result,
         "optimized_markdown": opt_md,
         "opt_stats": opt_stats,
         "original_name": original_name,
+        "chunks": result.chunks if result.chunks else None,
     }
 
     logger.info(
@@ -116,12 +128,12 @@ async def _run_single_conversion(
     )
 
     # ── Determine which extractor was used ───────────────────────────────────
-    # The extractor info is stored in result metadata if available
-    extractor_name = "markitdown"  # default
-    if document_type == "research_paper":
-        extractor_name = extractor_override or "docling"
-    if extractor_override:
-        extractor_name = extractor_override
+    # Report the REAL extractor (set by the extractor layer, e.g.
+    # "docling→markitdown" when Docling failed and fell back). Falls back to
+    # the requested one only if the result didn't record it.
+    extractor_name = result.extractor or extractor_override or (
+        "docling" if document_type == "research_paper" else "markitdown"
+    )
 
     return ConversionResponse(
         file_id=file_id,
@@ -142,6 +154,11 @@ async def _run_single_conversion(
         token_estimate=result.token_estimate,
         file_size_bytes=result.file_size_bytes,
         optimization_stats=opt_stats_response,
+        # RAG-only fields (None/0 for other modes → backward compatible)
+        mode="rag" if rag_chunks is not None else None,
+        detected_document_type=result.detected_document_type or None,
+        chunk_count=len(rag_chunks) if rag_chunks else 0,
+        chunks=rag_chunks,
     )
 
 
@@ -174,6 +191,8 @@ async def convert_single(
         result_registry=result_registry,
         svc=svc,
         extractor_override=body.extractor_override,
+        chunk_max_tokens=body.chunk_max_tokens,
+        chunk_overlap_tokens=body.chunk_overlap_tokens,
     )
 
 
@@ -205,6 +224,8 @@ async def convert_batch(
                 result_registry=result_registry,
                 svc=svc,
                 extractor_override=item.extractor_override,
+                chunk_max_tokens=item.chunk_max_tokens,
+                chunk_overlap_tokens=item.chunk_overlap_tokens,
             )
         except HTTPException as exc:
             # Surface per-file errors without aborting the whole batch

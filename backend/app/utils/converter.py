@@ -60,6 +60,11 @@ class ConversionResult:
     error: str = ""
     duration_s: float = 0.0
     file_size_bytes: int = 0
+    extractor: str = ""         # actual extractor used (e.g. "docling", "docling→markitdown")
+
+    # RAG mode only — populated by ConversionService when mode == "rag"
+    chunks: Optional[list] = None              # list[dict] of structured chunks
+    detected_document_type: str = ""           # heuristic label for RAG responses
 
     # OCR metadata
     ocr_used: bool = False

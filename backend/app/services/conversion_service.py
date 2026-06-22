@@ -45,6 +45,8 @@ class ConversionService:
         optimization_mode: str | None = None,
         embedded_ocr_mode: str = "Smart (Recommended)",
         extractor_override: str | None = None,
+        chunk_max_tokens: int | None = None,
+        chunk_overlap_tokens: int | None = None,
     ) -> tuple[ConversionResult, str, Optional[OptimizationStats]]:
         """Run the full pipeline asynchronously.
 
@@ -93,6 +95,7 @@ class ConversionService:
             ocr_used=extraction.ocr_used,
             ocr_warning=extraction.ocr_warning,
             embedded_images_ocr_count=extraction.embedded_images_ocr_count,
+            extractor=extraction.extractor,
         )
         if result.success:
             result._compute_stats()
@@ -111,6 +114,28 @@ class ConversionService:
         opt_svc = OptimizationService()
 
         opt_md, opt_stats = await opt_svc.optimize(extraction.markdown, mode=mode)
+
+        # ── 4. RAG mode → structured chunks + metadata (extra, not a replacement) ─
+        # markdown/optimized_markdown are preserved untouched; RAG only ADDS
+        # structured output. Other modes skip this branch entirely.
+        if mode == "rag":
+            from app.services.chunking_service import ChunkingService
+            from app.utils.doctype import detect_document_type
+
+            detected_type = detect_document_type(
+                opt_md, original_name, requested_type=document_type,
+            )
+            chunks = await ChunkingService().chunk_structured(
+                opt_md, chunk_max_tokens, chunk_overlap_tokens,
+                source_file=original_name,
+                document_type=detected_type,
+            )
+            result.chunks = chunks
+            result.detected_document_type = detected_type
+            logger.info(
+                "[conversion_service] RAG: '%s' → %d chunks, detected_type=%s",
+                original_name, len(chunks), result.detected_document_type,
+            )
 
         logger.info(
             "[conversion_service] Done: '%s' extractor=%s mode=%s "

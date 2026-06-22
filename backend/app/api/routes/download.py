@@ -113,7 +113,7 @@ async def download_zip(
             detail=f"No result for file_id '{file_id}'.",
         )
 
-    chunks: list[str] | None = entry.get("chunks")
+    chunks: list | None = entry.get("chunks")
     if not chunks:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -123,14 +123,26 @@ async def download_zip(
             ),
         )
 
-    # ── Build ZIP from in-memory strings ─────────────────────────────────────
+    # ── Build ZIP from in-memory chunks ──────────────────────────────────────
+    # Chunks are structured dicts (RAG / structured /api/chunk). A legacy
+    # list[str] is still handled for backward compatibility.
+    import json as _json
+
     original_name = entry.get("original_name", file_id)
     stem = Path(original_name).stem
 
-    chunk_items = [
-        (f"{stem}_chunk_{i + 1:03d}.md", chunk)
-        for i, chunk in enumerate(chunks)
-    ]
+    chunk_items: list[tuple[str, str]] = []
+    manifest: list[dict] = []
+    for i, chunk in enumerate(chunks):
+        if isinstance(chunk, dict):
+            content = chunk.get("content", "")
+            manifest.append({k: v for k, v in chunk.items() if k != "content"})
+        else:
+            content = chunk  # legacy string chunk
+        chunk_items.append((f"{stem}_chunk_{i + 1:03d}.md", content))
+
+    if manifest:
+        chunk_items.append(("chunks.json", _json.dumps(manifest, indent=2, ensure_ascii=False)))
 
     zip_bytes = await zip_svc.build_zip_from_strings(chunk_items)
     zip_filename = f"{stem}_chunks.zip"
